@@ -1,0 +1,46 @@
+@echo off
+echo Building Galaxy CPU project with vcpkg...
+
+:: Set vcpkg root path
+set VCPKG_ROOT=C:\vcpkg
+
+:: Check if vcpkg exists
+if not exist "%VCPKG_ROOT%\vcpkg.exe" (
+    echo Error: vcpkg not found at %VCPKG_ROOT%
+    echo Please make sure vcpkg is installed at C:\vcpkg
+    echo You can clone it from: https://github.com/Microsoft/vcpkg.git
+    echo And run: .\bootstrap-vcpkg.bat
+    pause
+    exit /b 1
+)
+
+:: Create build directory
+if not exist "build" mkdir build
+
+:: Run vcpkg to install dependencies
+echo Installing dependencies with vcpkg...
+"%VCPKG_ROOT%\vcpkg.exe" install --triplet x64-windows
+
+:: Configure with CMake
+echo Configuring with CMake...
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
+
+if errorlevel 1 (
+    echo Error: CMake configuration failed
+    pause
+    exit /b 1
+)
+
+:: Build the project
+echo Building the project...
+cmake --build build --config Release
+
+if errorlevel 1 (
+    echo Error: Build failed
+    pause
+    exit /b 1
+)
+
+echo Build completed successfully!
+echo Executable location: build\bin\Release\GalaxyApp.exe
+pause
