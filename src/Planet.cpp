@@ -316,7 +316,7 @@ void Planet::rebuildMesh() {
     
     // Build final vertex data with colors based on subdivision level
     m_finalVertices.clear();
-    m_finalVertices.reserve(finalVertexPositions.size() * 6);
+    m_finalVertices.reserve(finalVertexPositions.size() * 9); // 3 position + 3 color + 3 normal
     
     for (size_t i = 0; i < finalVertexPositions.size(); ++i) {
         const auto& vertex = finalVertexPositions[i];
@@ -325,102 +325,20 @@ void Planet::rebuildMesh() {
         // Add position
         m_finalVertices.insert(m_finalVertices.end(), {vertex.x, vertex.y, vertex.z});
         
-        // Add color based on subdivision level and planet's base color
+        // Add color based only on planet's base color (no LOD color modification)
         float normalizedHeight = (vertex.y / m_radius + 1.0f) * 0.5f; // 0 to 1
         glm::vec3 baseColor = m_color;
         
-        // Modify color based on subdivision level for debugging
-        switch (subdivisionLevel) {
-            case 0:
-                // Base level - original color
-                break;
-            case 1:
-                // Level 1 - slightly more green
-                baseColor.g = std::min(1.0f, baseColor.g + 0.08f);
-                break;
-            case 2:
-                // Level 2 - more green
-                baseColor.g = std::min(1.0f, baseColor.g + 0.15f);
-                break;
-            case 3:
-                // Level 3 - yellow tint
-                baseColor.r = std::min(1.0f, baseColor.r + 0.12f);
-                baseColor.g = std::min(1.0f, baseColor.g + 0.12f);
-                break;
-            case 4:
-                // Level 4 - orange tint
-                baseColor.r = std::min(1.0f, baseColor.r + 0.25f);
-                baseColor.g = std::min(1.0f, baseColor.g + 0.12f);
-                break;
-            case 5:
-                // Level 5 - red tint
-                baseColor.r = std::min(1.0f, baseColor.r + 0.4f);
-                break;
-            case 6:
-                // Level 6 - magenta tint
-                baseColor.r = std::min(1.0f, baseColor.r + 0.35f);
-                baseColor.b = std::min(1.0f, baseColor.b + 0.20f);
-                break;
-            case 7:
-                // Level 7 - cyan tint
-                baseColor.g = std::min(1.0f, baseColor.g + 0.35f);
-                baseColor.b = std::min(1.0f, baseColor.b + 0.35f);
-                break;
-            case 8:
-                // Level 8 - blanc brillant
-                baseColor.r = std::min(1.0f, baseColor.r + 0.4f);
-                baseColor.g = std::min(1.0f, baseColor.g + 0.4f);
-                baseColor.b = std::min(1.0f, baseColor.b + 0.4f);
-                break;
-            case 9:
-                // Level 9 - rose brillant (ultra précision)
-                baseColor.r = std::min(1.0f, baseColor.r + 0.6f);
-                baseColor.g = std::min(1.0f, baseColor.g + 0.2f);
-                baseColor.b = std::min(1.0f, baseColor.b + 0.5f);
-                break;
-            case 10:
-                // Level 10 - blanc pur (précision maximale)
-                baseColor.r = 1.0f;
-                baseColor.g = 1.0f;
-                baseColor.b = 1.0f;
-                break;
-            case 11:
-                // Level 11 - jaune ultra vif
-                baseColor.r = 1.0f;
-                baseColor.g = 1.0f;
-                baseColor.b = std::min(1.0f, baseColor.b + 0.3f);
-                break;
-            case 12:
-                // Level 12 - orange ultra vif
-                baseColor.r = 1.0f;
-                baseColor.g = std::min(1.0f, baseColor.g + 0.5f);
-                baseColor.b = std::min(1.0f, baseColor.b + 0.1f);
-                break;
-            case 13:
-                // Level 13 - rouge ultra vif
-                baseColor.r = 1.0f;
-                baseColor.g = std::min(1.0f, baseColor.g + 0.3f);
-                baseColor.b = std::min(1.0f, baseColor.b + 0.1f);
-                break;
-            case 14:
-                // Level 14 - blanc éclatant (ultra maximum)
-                baseColor.r = 1.0f;
-                baseColor.g = 1.0f;
-                baseColor.b = 1.0f;
-                break;
-            default:
-                // Niveaux encore plus élevés - blanc éclatant
-                baseColor.r = 1.0f;
-                baseColor.g = 1.0f;
-                baseColor.b = 1.0f;
-                break;
-        }
-        
+        // Simple height-based variation to add visual interest
         float r = baseColor.r * (0.8f + 0.2f * normalizedHeight);
         float g = baseColor.g * (0.8f + 0.2f * normalizedHeight);
         float b = baseColor.b * (0.8f + 0.2f * normalizedHeight);
         
         m_finalVertices.insert(m_finalVertices.end(), {r, g, b});
+        
+        // Add normal (normalized position for sphere)
+        glm::vec3 normal = glm::normalize(vertex);
+        m_finalVertices.insert(m_finalVertices.end(), {normal.x, normal.y, normal.z});
     }
     
     m_sphereVertexCount = static_cast<int>(finalVertexPositions.size());
@@ -445,12 +363,16 @@ void Planet::rebuildMesh() {
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_finalIndices.size() * sizeof(unsigned int), m_finalIndices.data(), GL_DYNAMIC_DRAW);
     
     // Position attribute
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
     
     // Color attribute
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
+    
+    // Normal attribute
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
     
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
@@ -608,9 +530,9 @@ void Planet::performCulling(Camera* camera, float aspectRatio) {
         unsigned int i3 = m_finalIndices[i + 2];
         
         // Convert vertex buffer indices to positions (each vertex has 6 floats: xyz + rgb)
-        glm::vec3 v1(m_finalVertices[i1 * 6], m_finalVertices[i1 * 6 + 1], m_finalVertices[i1 * 6 + 2]);
-        glm::vec3 v2(m_finalVertices[i2 * 6], m_finalVertices[i2 * 6 + 1], m_finalVertices[i2 * 6 + 2]);
-        glm::vec3 v3(m_finalVertices[i3 * 6], m_finalVertices[i3 * 6 + 1], m_finalVertices[i3 * 6 + 2]);
+        glm::vec3 v1(m_finalVertices[i1 * 9], m_finalVertices[i1 * 9 + 1], m_finalVertices[i1 * 9 + 2]);
+        glm::vec3 v2(m_finalVertices[i2 * 9], m_finalVertices[i2 * 9 + 1], m_finalVertices[i2 * 9 + 2]);
+        glm::vec3 v3(m_finalVertices[i3 * 9], m_finalVertices[i3 * 9 + 1], m_finalVertices[i3 * 9 + 2]);
         
         // Transform vertices to world space
         glm::vec4 worldV1 = modelMatrix * glm::vec4(v1, 1.0f);

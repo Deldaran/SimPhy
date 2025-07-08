@@ -24,14 +24,19 @@ const char* vertexShaderSource = R"(
 #version 330 core
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aColor;
+layout (location = 2) in vec3 aNormal;
 
 out vec3 vertexColor;
+out vec3 worldPos;
+out vec3 normal;
 
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
 
 void main() {
+    worldPos = vec3(model * vec4(aPos, 1.0));
+    normal = mat3(transpose(inverse(model))) * aNormal;
     gl_Position = projection * view * model * vec4(aPos, 1.0);
     vertexColor = aColor;
 }
@@ -41,10 +46,88 @@ void main() {
 const char* fragmentShaderSource = R"(
 #version 330 core
 in vec3 vertexColor;
+in vec3 worldPos;
+in vec3 normal;
+
 out vec4 FragColor;
 
+uniform vec3 viewPos;
+uniform vec3 sunPos;
+uniform float sunRadius;
+uniform bool isSun;
+uniform float time;
+
+// Ray marching parameters
+const int MAX_STEPS = 100;
+const float MIN_DISTANCE = 0.01;
+const float MAX_DISTANCE = 50000.0;
+
+// Distance function for sphere (sun)
+float sdSphere(vec3 p, vec3 center, float radius) {
+    return length(p - center) - radius;
+}
+
+// Ray marching for volumetric lighting from sun
+float rayMarchLight(vec3 pointPos, vec3 lightDir, float distanceToSun) {
+    // Simple attenuation based on distance from sun
+    float baseIntensity = 1.0 / (1.0 + 0.00001 * distanceToSun);
+    
+    // Add some atmospheric scattering effect
+    vec3 sunToPoint = pointPos - sunPos;
+    float distanceFromSunCenter = length(sunToPoint);
+    
+    // Light intensity decreases with distance but never goes to zero
+    float lightIntensity = max(0.1, baseIntensity);
+    
+    return lightIntensity;
+}
+
 void main() {
-    FragColor = vec4(vertexColor, 1.0);
+    if (isSun) {
+        // Sun rendering with glow effect
+        vec3 sunColor = vec3(1.0, 0.8, 0.2);
+        
+        // Add pulsing effect
+        float pulse = 0.8 + 0.2 * sin(time * 2.0);
+        
+        // Add surface detail using noise-like function
+        vec3 localPos = normalize(worldPos - sunPos);
+        float surface = sin(localPos.x * 20.0) * sin(localPos.y * 20.0) * sin(localPos.z * 20.0);
+        surface = surface * 0.1 + 0.9;
+        
+        FragColor = vec4(sunColor * pulse * surface * 2.0, 1.0);
+    } else {
+        // Planet rendering with lighting
+        vec3 norm = normalize(normal);
+        vec3 lightDir = normalize(sunPos - worldPos);
+        vec3 viewDir = normalize(viewPos - worldPos);
+        
+        // Calculate distance to sun for attenuation
+        float distanceToSun = length(sunPos - worldPos);
+        
+        // Use ray marching to calculate light intensity
+        float lightIntensity = rayMarchLight(worldPos, lightDir, distanceToSun);
+        
+        // Diffuse lighting
+        float diff = max(dot(norm, lightDir), 0.0);
+        
+        // Specular lighting
+        vec3 reflectDir = reflect(-lightDir, norm);
+        float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+        
+        // Ambient lighting
+        vec3 ambient = 0.1 * vertexColor;
+        
+        // Sun light color
+        vec3 lightColor = vec3(1.0, 0.9, 0.7);
+        
+        // Combine lighting
+        vec3 diffuse = diff * lightColor * vertexColor * lightIntensity;
+        vec3 specular = spec * lightColor * 0.5 * lightIntensity;
+        
+        vec3 result = ambient + diffuse + specular;
+        FragColor = vec4(result, 1.0);
+    }
 }
 )";
 
@@ -132,8 +215,8 @@ Scene::Scene() : m_backgroundColor(0.05f, 0.05f, 0.15f), m_lastFrame(0.0f), m_de
                  m_shaderProgram(0), 
                  m_computeProgram(0), m_positionBuffer(0), m_velocityBuffer(0), m_colorBuffer(0),
                  m_time(0.0f) {
-    // Créer la caméra - Position initiale près de la Terre pour la voir (nouvelle taille)
-    m_camera = std::make_unique<Camera>(glm::vec3(5500.0f, 0.0f, 0.0f));
+    // Créer la caméra - Position initiale pour voir le système solaire depuis une perspective intéressante
+    m_camera = std::make_unique<Camera>(glm::vec3(8000.0f, 2000.0f, 8000.0f));
 }
 
 // Destructeur de la scène - Appelle la méthode cleanup pour libérer les ressources
@@ -191,9 +274,32 @@ void Scene::render() {
     // Apply camera collision with all planets
     applyCameraCollision();
     
+    // Use the shader program
+    glUseProgram(m_shaderProgram);
+    
+    // Set global uniforms
+    glm::vec3 cameraPos = m_camera->getPosition();
+    glUniform3f(glGetUniformLocation(m_shaderProgram, "viewPos"), cameraPos.x, cameraPos.y, cameraPos.z);
+    
+    // Time for sun animation
+    m_time += m_deltaTime;
+    glUniform1f(glGetUniformLocation(m_shaderProgram, "time"), m_time);
+    
+    // Sun properties (assuming first planet is the sun)
+    if (!m_planets.empty()) {
+        glm::vec3 sunPos = m_planets[0]->getPosition();
+        float sunRadius = m_planets[0]->getRadius();
+        glUniform3f(glGetUniformLocation(m_shaderProgram, "sunPos"), sunPos.x, sunPos.y, sunPos.z);
+        glUniform1f(glGetUniformLocation(m_shaderProgram, "sunRadius"), sunRadius);
+    }
+    
     // Render all planets
-    for (auto& planet : m_planets) {
-        planet->render(m_shaderProgram, m_camera.get(), 1440.0f / 900.0f);
+    for (size_t i = 0; i < m_planets.size(); ++i) {
+        // Set if this is the sun (first planet)
+        bool isSun = (i == 0);
+        glUniform1i(glGetUniformLocation(m_shaderProgram, "isSun"), isSun ? 1 : 0);
+        
+        m_planets[i]->render(m_shaderProgram, m_camera.get(), 1440.0f / 900.0f);
     }
 }
 
@@ -302,54 +408,105 @@ void Scene::setupGPUBuffers() {
 // Configure les planètes par défaut dans la scène
 void Scene::setupPlanets() {
     // Système solaire à l'échelle avec des tailles augmentées pour une meilleure visibilité
+    // Planètes disposées en orbites circulaires autour du soleil
     
     // Soleil au centre (jaune-orange, énorme)
     addPlanet(glm::vec3(0.0f, 0.0f, 0.0f), 1000.0f, glm::vec3(1.0f, 0.8f, 0.2f));
     
+    // Orbites avec différents angles pour créer un système 3D réaliste
+    float mercuryAngle = 0.0f;
+    float venusAngle = 45.0f * M_PI / 180.0f;
+    float earthAngle = 90.0f * M_PI / 180.0f;
+    float marsAngle = 135.0f * M_PI / 180.0f;
+    float jupiterAngle = 180.0f * M_PI / 180.0f;
+    float saturnAngle = 225.0f * M_PI / 180.0f;
+    float uranusAngle = 270.0f * M_PI / 180.0f;
+    float neptuneAngle = 315.0f * M_PI / 180.0f;
+    
     // Mercure (gris, petit, proche du soleil)
-    addPlanet(glm::vec3(2000.0f, 0.0f, 0.0f), 100.0f, glm::vec3(0.7f, 0.7f, 0.7f));
+    float mercuryOrbitRadius = 2000.0f;
+    addPlanet(glm::vec3(
+        mercuryOrbitRadius * cos(mercuryAngle), 
+        0.0f, 
+        mercuryOrbitRadius * sin(mercuryAngle)
+    ), 100.0f, glm::vec3(0.7f, 0.7f, 0.7f));
     
     // Vénus (orange-jaune, moyen)
-    addPlanet(glm::vec3(3500.0f, 0.0f, 0.0f), 200.0f, glm::vec3(1.0f, 0.7f, 0.3f));
+    float venusOrbitRadius = 3500.0f;
+    addPlanet(glm::vec3(
+        venusOrbitRadius * cos(venusAngle), 
+        200.0f * sin(venusAngle * 2.0f), // Légère inclinaison orbitale
+        venusOrbitRadius * sin(venusAngle)
+    ), 200.0f, glm::vec3(1.0f, 0.7f, 0.3f));
     
     // Terre (bleu-vert, moyen)
-    addPlanet(glm::vec3(5000.0f, 0.0f, 0.0f), 250.0f, glm::vec3(0.2f, 0.6f, 1.0f));
+    float earthOrbitRadius = 5000.0f;
+    addPlanet(glm::vec3(
+        earthOrbitRadius * cos(earthAngle), 
+        100.0f * sin(earthAngle * 1.5f), // Légère inclinaison orbitale
+        earthOrbitRadius * sin(earthAngle)
+    ), 250.0f, glm::vec3(0.2f, 0.6f, 1.0f));
     
     // Mars (rouge, moyen)
-    addPlanet(glm::vec3(7000.0f, 0.0f, 0.0f), 150.0f, glm::vec3(0.8f, 0.3f, 0.2f));
+    float marsOrbitRadius = 7000.0f;
+    addPlanet(glm::vec3(
+        marsOrbitRadius * cos(marsAngle), 
+        -150.0f * sin(marsAngle * 1.8f), // Inclinaison orbitale différente
+        marsOrbitRadius * sin(marsAngle)
+    ), 150.0f, glm::vec3(0.8f, 0.3f, 0.2f));
     
     // Jupiter (orange-brun, très grand)
-    addPlanet(glm::vec3(10000.0f, 0.0f, 0.0f), 500.0f, glm::vec3(0.9f, 0.6f, 0.3f));
+    float jupiterOrbitRadius = 10000.0f;
+    addPlanet(glm::vec3(
+        jupiterOrbitRadius * cos(jupiterAngle), 
+        300.0f * sin(jupiterAngle * 0.8f), // Grande inclinaison orbitale
+        jupiterOrbitRadius * sin(jupiterAngle)
+    ), 500.0f, glm::vec3(0.9f, 0.6f, 0.3f));
     
     // Saturne (jaune-brun, grand)
-    addPlanet(glm::vec3(15000.0f, 0.0f, 0.0f), 400.0f, glm::vec3(0.9f, 0.8f, 0.5f));
+    float saturnOrbitRadius = 15000.0f;
+    addPlanet(glm::vec3(
+        saturnOrbitRadius * cos(saturnAngle), 
+        -250.0f * sin(saturnAngle * 1.2f), // Inclinaison orbitale
+        saturnOrbitRadius * sin(saturnAngle)
+    ), 400.0f, glm::vec3(0.9f, 0.8f, 0.5f));
     
     // Uranus (bleu-cyan, moyen)
-    addPlanet(glm::vec3(25000.0f, 0.0f, 0.0f), 300.0f, glm::vec3(0.3f, 0.8f, 0.9f));
+    float uranusOrbitRadius = 25000.0f;
+    addPlanet(glm::vec3(
+        uranusOrbitRadius * cos(uranusAngle), 
+        400.0f * sin(uranusAngle * 0.6f), // Forte inclinaison orbitale
+        uranusOrbitRadius * sin(uranusAngle)
+    ), 300.0f, glm::vec3(0.3f, 0.8f, 0.9f));
     
     // Neptune (bleu foncé, moyen)
-    addPlanet(glm::vec3(35000.0f, 0.0f, 0.0f), 280.0f, glm::vec3(0.2f, 0.4f, 0.9f));
+    float neptuneOrbitRadius = 35000.0f;
+    addPlanet(glm::vec3(
+        neptuneOrbitRadius * cos(neptuneAngle), 
+        -350.0f * sin(neptuneAngle * 0.9f), // Inclinaison orbitale
+        neptuneOrbitRadius * sin(neptuneAngle)
+    ), 280.0f, glm::vec3(0.2f, 0.4f, 0.9f));
     
     // Définir les rotations des planètes (vitesses ultra réduites pour un rendu très réaliste)
     if (m_planets.size() >= 9) {
-        m_planets[0]->setRotationSpeed(0.001f);  // Soleil - rotation extrêmement lente
-        m_planets[1]->setRotationSpeed(0.005f);  // Mercure - rotation très lente
-        m_planets[2]->setRotationSpeed(-0.009f); // Vénus - rotation rétrograde ultra lente
-        m_planets[3]->setRotationSpeed(0.008f);  // Terre - rotation très lente
+        m_planets[0]->setRotationSpeed(0.0001f);  // Soleil - rotation extrêmement lente
+        m_planets[1]->setRotationSpeed(0.0005f);  // Mercure - rotation très lente
+        m_planets[2]->setRotationSpeed(-0.0009f); // Vénus - rotation rétrograde ultra lente
+        m_planets[3]->setRotationSpeed(0.0008f);  // Terre - rotation très lente
         m_planets[3]->setRotationAxis(glm::vec3(0.1f, 1.0f, 0.0f)); // Terre légèrement inclinée
-        m_planets[4]->setRotationSpeed(0.007f);  // Mars - rotation très lente
-        m_planets[5]->setRotationSpeed(0.008f);  // Jupiter - rotation lente
-        m_planets[6]->setRotationSpeed(0.001f);  // Saturne - rotation lente
+        m_planets[4]->setRotationSpeed(0.0007f);  // Mars - rotation très lente
+        m_planets[5]->setRotationSpeed(0.0008f);  // Jupiter - rotation lente
+        m_planets[6]->setRotationSpeed(0.0001f);  // Saturne - rotation lente
         m_planets[6]->setRotationAxis(glm::vec3(0.5f, 1.0f, 0.1f)); // Saturne inclinée
-        m_planets[7]->setRotationSpeed(-0.001f); // Uranus - rotation rétrograde très lente
+        m_planets[7]->setRotationSpeed(-0.0001f); // Uranus - rotation rétrograde très lente
         m_planets[7]->setRotationAxis(glm::vec3(0.9f, 0.4f, 0.0f)); // Uranus très inclinée
-        m_planets[8]->setRotationSpeed(0.008f);  // Neptune - rotation très lente
+        m_planets[8]->setRotationSpeed(0.0008f);  // Neptune - rotation très lente
         
         // Planètes supplémentaires
         if (m_planets.size() >= 11) {
-            m_planets[9]->setRotationSpeed(0.006f);
+            m_planets[9]->setRotationSpeed(0.0006f);
             m_planets[9]->setRotationAxis(glm::vec3(0.3f, 1.0f, 0.7f));
-            m_planets[10]->setRotationSpeed(-0.004f);
+            m_planets[10]->setRotationSpeed(-0.0004f);
             m_planets[10]->setRotationAxis(glm::vec3(0.8f, 0.2f, 1.0f));
         }
     }
