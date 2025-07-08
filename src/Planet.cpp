@@ -11,7 +11,7 @@
 Planet::Planet(const glm::vec3& position, float radius, const glm::vec3& color)
     : m_position(position), m_radius(radius), m_color(color),
       m_rotationAxis(0.0f, 1.0f, 0.0f), m_rotationSpeed(0.0f), m_currentRotation(0.0f),
-      m_VAO(0), m_VBO(0), m_EBO(0), m_sphereVertexCount(0), m_sphereIndexCount(0),
+      m_VAO(0), m_VBO(0), m_EBO(0), m_sphereVertexCount(0), m_sphereIndexCount(0), m_culledIndexCount(0),
       m_lastCameraPosition(0.0f), m_lodNeedsUpdate(true), m_lastLODUpdateTime(0.0f) {
 }
 
@@ -81,6 +81,8 @@ void Planet::generateSphere() {
         triangle.distanceToCamera = 0.0f;
         triangle.subdivisionLevel = 0;
         triangle.needsUpdate = true;
+        triangle.isVisible = true;
+        triangle.normal = calculateTriangleNormal(m_vertices[triangle.v1], m_vertices[triangle.v2], m_vertices[triangle.v3]);
         m_triangles.push_back(triangle);
     }
     
@@ -88,7 +90,7 @@ void Planet::generateSphere() {
     m_lodNeedsUpdate = true;
 }
 
-// Effectue le rendu de la planète avec le système LOD
+// Effectue le rendu de la planète avec le système LOD et culling
 void Planet::render(unsigned int shaderProgram, Camera* camera, float aspectRatio) {
     // Update LOD system
     updateDynamicLOD(camera);
@@ -110,9 +112,12 @@ void Planet::render(unsigned int shaderProgram, Camera* camera, float aspectRati
     glUniformMatrix4fv(viewLoc, 1, GL_FALSE, &view[0][0]);
     glUniformMatrix4fv(projLoc, 1, GL_FALSE, &projection[0][0]);
     
-    // Render the planet
+    // Perform culling to optimize rendering (after setting up matrices)
+    performCulling(camera, aspectRatio);
+    
+    // Render only the visible triangles after culling
     glBindVertexArray(m_VAO);
-    glDrawElements(GL_TRIANGLES, m_sphereIndexCount, GL_UNSIGNED_INT, 0);
+    glDrawElements(GL_TRIANGLES, m_culledIndexCount, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
 }
 
@@ -579,4 +584,164 @@ glm::mat4 Planet::getModelMatrix() const {
     }
     
     return model;
+}
+
+// Effectue le culling des triangles pour optimiser le rendu
+void Planet::performCulling(Camera* camera, float aspectRatio) {
+    m_culledIndices.clear();
+    
+    int totalTriangles = 0;
+    int culledTriangles = 0;
+    int backfaceCulled = 0;
+    int frustumCulled = 0;
+    
+    glm::vec3 cameraPos = camera->getPosition();
+    glm::mat4 modelMatrix = getModelMatrix();
+    
+    // Process triangles in groups of 3 indices (one triangle)
+    for (size_t i = 0; i < m_finalIndices.size(); i += 3) {
+        totalTriangles++;
+        
+        // Get vertex indices
+        unsigned int i1 = m_finalIndices[i];
+        unsigned int i2 = m_finalIndices[i + 1];
+        unsigned int i3 = m_finalIndices[i + 2];
+        
+        // Convert vertex buffer indices to positions (each vertex has 6 floats: xyz + rgb)
+        glm::vec3 v1(m_finalVertices[i1 * 6], m_finalVertices[i1 * 6 + 1], m_finalVertices[i1 * 6 + 2]);
+        glm::vec3 v2(m_finalVertices[i2 * 6], m_finalVertices[i2 * 6 + 1], m_finalVertices[i2 * 6 + 2]);
+        glm::vec3 v3(m_finalVertices[i3 * 6], m_finalVertices[i3 * 6 + 1], m_finalVertices[i3 * 6 + 2]);
+        
+        // Transform vertices to world space
+        glm::vec4 worldV1 = modelMatrix * glm::vec4(v1, 1.0f);
+        glm::vec4 worldV2 = modelMatrix * glm::vec4(v2, 1.0f);
+        glm::vec4 worldV3 = modelMatrix * glm::vec4(v3, 1.0f);
+        
+        glm::vec3 wv1 = glm::vec3(worldV1);
+        glm::vec3 wv2 = glm::vec3(worldV2);
+        glm::vec3 wv3 = glm::vec3(worldV3);
+        
+        // Backface culling - vérifier si le triangle fait face à la caméra
+        if (isBackfacing(wv1, wv2, wv3, cameraPos)) {
+            backfaceCulled++;
+            culledTriangles++;
+            continue;
+        }
+        
+        // Frustum culling - vérifier si le triangle est dans le champ de vision
+        if (!isTriangleInFrustum(wv1, wv2, wv3, camera, aspectRatio)) {
+            frustumCulled++;
+            culledTriangles++;
+            continue;
+        }
+        
+        // Triangle is visible, add to culled indices
+        m_culledIndices.push_back(i1);
+        m_culledIndices.push_back(i2);
+        m_culledIndices.push_back(i3);
+    }
+    
+    m_culledIndexCount = static_cast<int>(m_culledIndices.size());
+    
+    // Update OpenGL Element Buffer with culled indices
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_culledIndices.size() * sizeof(unsigned int), 
+                 m_culledIndices.data(), GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+}
+
+// Teste si un triangle fait face à la caméra (backface culling)
+bool Planet::isBackfacing(const glm::vec3& v1, const glm::vec3& v2, const glm::vec3& v3, const glm::vec3& cameraPos) {
+    // Calcule la normale du triangle
+    glm::vec3 normal = calculateTriangleNormal(v1, v2, v3);
+    
+    // Calcule le centre du triangle
+    glm::vec3 triangleCenter = (v1 + v2 + v3) / 3.0f;
+    
+    // Vecteur du centre du triangle vers la caméra
+    glm::vec3 toCamera = glm::normalize(cameraPos - triangleCenter);
+    
+    // Si le produit scalaire est négatif, le triangle fait face à l'opposé de la caméra
+    float dotProduct = glm::dot(normal, toCamera);
+    
+    // Amélioration : utiliser un seuil pour éviter les problèmes de précision numérique
+    // et pour être plus agressif avec le culling des faces arrière
+    return dotProduct < -0.01f; // Seuil légèrement négatif pour plus d'agressivité
+}
+
+// Teste si un triangle est dans le frustum de la caméra (frustum culling)
+bool Planet::isTriangleInFrustum(const glm::vec3& v1, const glm::vec3& v2, const glm::vec3& v3, Camera* camera, float aspectRatio) {
+    glm::vec3 cameraPos = camera->getPosition();
+    glm::vec3 cameraFront = camera->getFront();
+    
+    // Calculer les matrices de la caméra
+    glm::mat4 view = camera->getViewMatrix();
+    glm::mat4 projection = camera->getProjectionMatrix(aspectRatio);
+    glm::mat4 viewProjection = projection * view;
+    
+    // Transformer chaque vertex du triangle en espace de clip
+    glm::vec4 clipV1 = viewProjection * glm::vec4(v1, 1.0f);
+    glm::vec4 clipV2 = viewProjection * glm::vec4(v2, 1.0f);
+    glm::vec4 clipV3 = viewProjection * glm::vec4(v3, 1.0f);
+    
+    // Test simple : si tous les vertices sont derrière la caméra (z négatif en view space)
+    glm::vec4 viewV1 = view * glm::vec4(v1, 1.0f);
+    glm::vec4 viewV2 = view * glm::vec4(v2, 1.0f);
+    glm::vec4 viewV3 = view * glm::vec4(v3, 1.0f);
+    
+    if (viewV1.z > 0.0f && viewV2.z > 0.0f && viewV3.z > 0.0f) {
+        return false; // Triangle complètement derrière la caméra
+    }
+    
+    // Diviser par w pour obtenir les coordonnées normalisées (NDC)
+    if (clipV1.w > 0.0001f) clipV1 /= clipV1.w;
+    if (clipV2.w > 0.0001f) clipV2 /= clipV2.w;
+    if (clipV3.w > 0.0001f) clipV3 /= clipV3.w;
+    
+    // Test de frustum : vérifier si au moins un vertex est dans le frustum [-1, 1] pour x, y, z
+    auto isVertexInFrustum = [](const glm::vec4& v) -> bool {
+        return v.x >= -1.0f && v.x <= 1.0f &&
+               v.y >= -1.0f && v.y <= 1.0f &&
+               v.z >= -1.0f && v.z <= 1.0f;
+    };
+    
+    // Si au moins un vertex est visible, considérer le triangle comme potentiellement visible
+    if (isVertexInFrustum(clipV1) || isVertexInFrustum(clipV2) || isVertexInFrustum(clipV3)) {
+        return true;
+    }
+    
+    // Test supplémentaire : vérifier si le triangle traverse le frustum
+    // Calculer les limites du triangle en NDC
+    float minX = std::min(clipV1.x, std::min(clipV2.x, clipV3.x));
+    float maxX = std::max(clipV1.x, std::max(clipV2.x, clipV3.x));
+    float minY = std::min(clipV1.y, std::min(clipV2.y, clipV3.y));
+    float maxY = std::max(clipV1.y, std::max(clipV2.y, clipV3.y));
+    
+    // Si le triangle englobe le frustum, il est visible
+    if (minX <= -1.0f && maxX >= 1.0f && minY <= -1.0f && maxY >= 1.0f) {
+        return true;
+    }
+    
+    // Si les limites intersectent le frustum, le triangle peut être visible
+    return !(maxX < -1.0f || minX > 1.0f || maxY < -1.0f || minY > 1.0f);
+}
+
+// Calcule la normale d'un triangle
+glm::vec3 Planet::calculateTriangleNormal(const glm::vec3& v1, const glm::vec3& v2, const glm::vec3& v3) {
+    glm::vec3 edge1 = v2 - v1;
+    glm::vec3 edge2 = v3 - v1;
+    glm::vec3 normal = glm::cross(edge1, edge2);
+    
+    // Normaliser si pas nul
+    if (glm::length(normal) > 0.0001f) {
+        normal = glm::normalize(normal);
+    } else {
+        // Fallback : utiliser la normale moyenne des vertices (pour les sphères)
+        // Car les vertices d'une sphère pointent vers l'extérieur depuis le centre
+        glm::vec3 center = m_position; // Centre de la planète
+        glm::vec3 avgVertex = (v1 + v2 + v3) / 3.0f;
+        normal = glm::normalize(avgVertex - center);
+    }
+    
+    return normal;
 }

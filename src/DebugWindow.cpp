@@ -10,7 +10,8 @@
 
 DebugWindow::DebugWindow() : m_hwnd(nullptr), m_isOpen(false), m_shouldClose(false),
                              m_nearestDistance(0.0f), m_nearestPlanetIndex(-1), 
-                             m_speedMultiplier(1.0f) {
+                             m_speedMultiplier(1.0f), m_currentFPS(0.0f), m_averageFPS(0.0f),
+                             m_frameCount(0), m_lastFPSUpdate(std::chrono::steady_clock::now()) {
     // Initialize planet names
     m_planetNames = {
         "Soleil", "Mercure", "Venus", "Terre", "Mars", 
@@ -172,6 +173,29 @@ void DebugWindow::paintWindow(HDC hdc) {
     TextOut(hdc, 20, y, speedText.c_str(), speedText.length());
     y += lineHeight * 2;
     
+    // FPS info
+    std::string fpsHeader = "--- PERFORMANCE ---";
+    TextOut(hdc, 20, y, fpsHeader.c_str(), fpsHeader.length());
+    y += lineHeight;
+    
+    ss.str("");
+    ss << "Current FPS: " << std::fixed << std::setprecision(1) << m_currentFPS;
+    std::string currentFpsText = ss.str();
+    TextOut(hdc, 20, y, currentFpsText.c_str(), currentFpsText.length());
+    y += lineHeight;
+    
+    ss.str("");
+    ss << "Average FPS: " << std::fixed << std::setprecision(1) << m_averageFPS;
+    std::string avgFpsText = ss.str();
+    TextOut(hdc, 20, y, avgFpsText.c_str(), avgFpsText.length());
+    y += lineHeight;
+    
+    ss.str("");
+    ss << "Frame Time: " << std::fixed << std::setprecision(2) << (1000.0f / std::max(0.1f, m_currentFPS)) << " ms";
+    std::string frameTimeText = ss.str();
+    TextOut(hdc, 20, y, frameTimeText.c_str(), frameTimeText.length());
+    y += lineHeight * 2;
+    
     // Nearest planet info
     std::string planetHeader = "--- NEAREST PLANET ---";
     TextOut(hdc, 20, y, planetHeader.c_str(), planetHeader.length());
@@ -275,6 +299,28 @@ void DebugWindow::update(Camera* camera, const std::vector<std::unique_ptr<Plane
             m_nearestDistance = distanceToSurface;
             m_nearestPlanetIndex = static_cast<int>(i);
         }
+    }
+}
+
+void DebugWindow::updateFPS(float deltaTime) {
+    std::lock_guard<std::mutex> lock(m_dataMutex);
+    
+    // Calculate current FPS
+    if (deltaTime > 0.0f) {
+        m_currentFPS = 1.0f / deltaTime;
+    }
+    
+    // Update frame count and average FPS calculation
+    m_frameCount++;
+    
+    // Update average FPS every second
+    auto now = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastFPSUpdate);
+    
+    if (duration.count() >= 1000) { // Update every 1000ms (1 second)
+        m_averageFPS = m_frameCount * 1000.0f / duration.count();
+        m_frameCount = 0;
+        m_lastFPSUpdate = now;
     }
 }
 

@@ -112,6 +112,7 @@ void Application::update() {
     
     // Update debug window with current scene info
     m_debugWindow->update(m_scene->getCamera(), m_scene->getPlanets());
+    m_debugWindow->updateFPS(deltaTime);
 }
 
 void Application::render() {

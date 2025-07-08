@@ -7,6 +7,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <chrono>
 
 class Camera;
 class Planet;
@@ -27,6 +28,12 @@ private:
     std::vector<float> m_planetDistances;
     std::vector<std::string> m_planetNames;
     
+    // FPS tracking
+    float m_currentFPS;
+    float m_averageFPS;
+    int m_frameCount;
+    std::chrono::steady_clock::time_point m_lastFPSUpdate;
+    
     // Window procedures
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
     void windowThreadFunction();
@@ -38,6 +45,7 @@ public:
     
     bool initialize();
     void update(Camera* camera, const std::vector<std::unique_ptr<Planet>>& planets);
+    void updateFPS(float deltaTime);
     void cleanup();
     
     bool shouldClose() const { return m_shouldClose.load(); }

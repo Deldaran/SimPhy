@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <memory>
 #include <functional>
+#include <cmath>
 #include "Camera.h"
 
 class Planet {
@@ -29,8 +30,10 @@ private:
     std::vector<glm::vec3> m_vertices;  // Vertices de base
     std::vector<float> m_finalVertices; // Vertices finaux avec couleurs
     std::vector<unsigned int> m_finalIndices; // Indices des triangles
+    std::vector<unsigned int> m_culledIndices; // Indices après culling
     int m_sphereVertexCount;            // Nombre de vertices
     int m_sphereIndexCount;             // Nombre d'indices
+    int m_culledIndexCount;             // Nombre d'indices après culling
     
     // Système LOD dynamique
     struct Triangle {
@@ -39,6 +42,8 @@ private:
         float distanceToCamera;         // Distance à la caméra
         int subdivisionLevel;           // Niveau de subdivision
         bool needsUpdate;               // Nécessite une mise à jour
+        bool isVisible;                 // Visible après culling
+        glm::vec3 normal;               // Normale du triangle (pour backface culling)
     };
     
     std::vector<Triangle> m_triangles;  // Triangles du maillage
@@ -50,9 +55,13 @@ private:
     void generateSphere();                      // Génère la géométrie sphérique
     void updateDynamicLOD(Camera* camera);      // Met à jour le système LOD
     void rebuildMesh();                         // Reconstruit le maillage
+    void performCulling(Camera* camera, float aspectRatio);        // Effectue le culling des triangles
+    bool isTriangleInFrustum(const glm::vec3& v1, const glm::vec3& v2, const glm::vec3& v3, Camera* camera, float aspectRatio); // Test frustum
+    bool isBackfacing(const glm::vec3& v1, const glm::vec3& v2, const glm::vec3& v3, const glm::vec3& cameraPos); // Test backface
     void subdivideTriangleRecursive(const glm::vec3& v1, const glm::vec3& v2, const glm::vec3& v3, 
                                    int level, int subdivisionLevel, std::function<int(const glm::vec3&, int)> addVertex); // Subdivision récursive
     glm::vec3 getTriangleCenter(const Triangle& triangle);  // Centre d'un triangle
+    glm::vec3 calculateTriangleNormal(const glm::vec3& v1, const glm::vec3& v2, const glm::vec3& v3); // Calcule la normale
     float getDistanceToCamera(const glm::vec3& point, Camera* camera);  // Distance à la caméra
     
 public:
@@ -100,10 +109,10 @@ struct Vec3Hash {
 
 // Fonction d'égalité pour glm::vec3
 struct Vec3Equal {
-    bool operator()(const glm::vec3& a, const glm::vec3& b) const {
-        const float epsilon = 0.0001f;
-        return std::abs(a.x - b.x) < epsilon && 
-               std::abs(a.y - b.y) < epsilon && 
-               std::abs(a.z - b.z) < epsilon;
+    bool operator()(const glm::vec3& lhs, const glm::vec3& rhs) const {
+        const float epsilon = 1e-6f;
+        return std::abs(lhs.x - rhs.x) < epsilon &&
+               std::abs(lhs.y - rhs.y) < epsilon &&
+               std::abs(lhs.z - rhs.z) < epsilon;
     }
 };
