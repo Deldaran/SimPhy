@@ -212,11 +212,26 @@ void main() {
 
 // Constructeur de la scène - Initialise tous les membres et crée la caméra
 Scene::Scene() : m_backgroundColor(0.05f, 0.05f, 0.15f), m_lastFrame(0.0f), m_deltaTime(0.0f), 
+                 m_timeScale(1.0f), m_showTimeControls(true),
                  m_shaderProgram(0), 
                  m_computeProgram(0), m_positionBuffer(0), m_velocityBuffer(0), m_colorBuffer(0),
                  m_time(0.0f) {
-    // Créer la caméra - Position initiale pour voir le système solaire depuis une perspective intéressante
-    m_camera = std::make_unique<Camera>(glm::vec3(8000.0f, 2000.0f, 8000.0f));
+    // Créer l'UI
+    m_ui = std::make_unique<UI>();
+    // Paramètres pour la planète unique dans notre système simplifié
+    float planetOrbitRadius = 14960.0f; // Distance Terre-Soleil
+    float planetRadius = 0.637f; // Rayon de la Terre
+    float altitude = 10.0f; // 10 unités = 100 km d'altitude
+    
+    // Position de la planète (à 0 degrés, sur l'axe X positif)
+    glm::vec3 planetPosition = glm::vec3(planetOrbitRadius, 0.0f, 0.0f);
+    
+    // Position initiale de la caméra près de la Terre
+    // Calculer la position à une certaine altitude au-dessus de la surface de la planète
+    glm::vec3 cameraPosition = planetPosition + glm::vec3(0.0f, planetRadius + altitude, 0.0f);
+    
+    // Créer la caméra avec orientation vers la surface de la Terre (regardant légèrement vers le bas)
+    m_camera = std::make_unique<Camera>(cameraPosition, glm::vec3(0.0f, 1.0f, 0.0f), 90.0f, -45.0f);
 }
 
 // Destructeur de la scène - Appelle la méthode cleanup pour libérer les ressources
@@ -263,6 +278,9 @@ void Scene::initialize() {
     setupPlanets();
     
     std::cout << "Scene initialized with GPU acceleration" << std::endl;
+    
+    // Afficher les informations sur les contrôles de temps (désormais en GUI)
+    std::cout << "Contrôles de temps disponibles via l'interface graphique (touche T)" << std::endl;
 }
 
 // Effectue le rendu de la scène - Dessine toutes les planètes
@@ -273,6 +291,16 @@ void Scene::render() {
     
     // Apply camera collision with all planets
     applyCameraCollision();
+    
+    // Début du rendu ImGui
+    if (m_ui) {
+        m_ui->beginFrame();
+        
+        // Afficher la fenêtre de contrôle du temps si activée
+        if (m_showTimeControls) {
+            m_ui->showTimeControlsWindow(m_timeScale);
+        }
+    }
     
     // Use the shader program
     glUseProgram(m_shaderProgram);
@@ -301,10 +329,20 @@ void Scene::render() {
         
         m_planets[i]->render(m_shaderProgram, m_camera.get(), 1440.0f / 900.0f);
     }
+    
+    // Finir le rendu ImGui après avoir dessiné les planètes
+    if (m_ui) {
+        m_ui->render();
+    }
 }
 
 // Nettoie et libère toutes les ressources OpenGL
 void Scene::cleanup() {
+    // Clean up UI
+    if (m_ui) {
+        m_ui->cleanup();
+    }
+    
     // Clean up planets
     for (auto& planet : m_planets) {
         planet->cleanup();
@@ -341,14 +379,50 @@ void Scene::setBackgroundColor(float r, float g, float b) {
     m_backgroundColor = glm::vec3(r, g, b);
 }
 
-// Met à jour la scène avec le temps delta - Met à jour toutes les planètes
+// Met à jour la scène avec le temps delta - Met à jour toutes les planètes et l'orbite
 void Scene::update(float deltaTime) {
-    m_deltaTime = deltaTime;
-    m_lastFrame += deltaTime;
+    // Applique le facteur d'échelle temporel
+    float scaledDeltaTime = deltaTime * m_timeScale;
+    m_deltaTime = scaledDeltaTime;
+    m_lastFrame += deltaTime; // Le lastFrame reste inchangé pour maintenir un temps réel pour l'UI
     
-    // Update all planets
+    // Update all planets (rotation sur elles-mêmes)
     for (auto& planet : m_planets) {
-        planet->update(deltaTime);
+        planet->update(scaledDeltaTime); // Utilise le temps mis à l'échelle
+    }
+    
+    // Mouvement orbital de la planète autour du soleil
+    if (m_planets.size() > 1) {
+        // Vitesse orbitale réaliste à l'échelle de la Terre
+        // 2π / (365.25 * 24 * 60 * 60) = 2π / 31557600 = 0.0000002 rad/s
+        // Cela donne exactement une année terrestre pour une révolution complète
+        static float earthYearInSeconds = 31557600.0f;
+        static float orbitalSpeed = 2.0f * M_PI / earthYearInSeconds;
+        static float orbitalAngle = 0.0f;
+        
+        // Calcul du nouvel angle orbital
+        orbitalAngle += orbitalSpeed * scaledDeltaTime; // Utilise le temps mis à l'échelle
+        
+        // Maintien de l'angle entre 0 et 2π
+        while (orbitalAngle >= 2.0f * M_PI) {
+            orbitalAngle -= 2.0f * M_PI;
+        }
+        
+        // Distance orbitale constante (14960 unités = distance Terre-Soleil)
+        float planetOrbitRadius = 14960.0f;
+        
+        // Inclinaison de l'orbite (environ 23.5 degrés pour la Terre, mais réduite pour visibilité)
+        const float orbitalInclination = 23.5f * M_PI / 180.0f * 0.2f; // 20% de l'inclinaison réelle
+        
+        // Mise à jour de la position de la planète avec inclinaison
+        glm::vec3 newPosition = glm::vec3(
+            planetOrbitRadius * cos(orbitalAngle),
+            planetOrbitRadius * sin(orbitalAngle) * sin(orbitalInclination), // Inclinaison de l'orbite
+            planetOrbitRadius * sin(orbitalAngle) * cos(orbitalInclination)
+        );
+        
+        // Mise à jour de la position de la planète
+        m_planets[1]->setPosition(newPosition);
     }
 }
 
@@ -407,111 +481,29 @@ void Scene::setupGPUBuffers() {
 
 // Configure les planètes par défaut dans la scène
 void Scene::setupPlanets() {
-    // Système solaire à l'échelle avec des tailles augmentées pour une meilleure visibilité
-    // Planètes disposées en orbites circulaires autour du soleil
+    // Système solaire simplifié avec une seule planète similaire à la Terre
+    // Échelle réelle : 10km = 1 unité
     
-    // Soleil au centre (jaune-orange, énorme)
-    addPlanet(glm::vec3(0.0f, 0.0f, 0.0f), 1000.0f, glm::vec3(1.0f, 0.8f, 0.2f));
+    // Soleil au centre - rayon réel: 696 340 km => 69.634 unités
+    addPlanet(glm::vec3(0.0f, 0.0f, 0.0f), 69.634f, glm::vec3(1.0f, 0.8f, 0.2f));
     
-    // Orbites avec différents angles pour créer un système 3D réaliste
-    float mercuryAngle = 0.0f;
-    float venusAngle = 45.0f * M_PI / 180.0f;
-    float earthAngle = 90.0f * M_PI / 180.0f;
-    float marsAngle = 135.0f * M_PI / 180.0f;
-    float jupiterAngle = 180.0f * M_PI / 180.0f;
-    float saturnAngle = 225.0f * M_PI / 180.0f;
-    float uranusAngle = 270.0f * M_PI / 180.0f;
-    float neptuneAngle = 315.0f * M_PI / 180.0f;
+    // Position initiale de la planète (arbitrairement choisie à 0 degrés)
+    float planetAngle = 0.0f;
     
-    // Mercure (gris, petit, proche du soleil)
-    float mercuryOrbitRadius = 2000.0f;
+    // Planète similaire à la Terre - rayon réel: 6 371 km => 0.637 unités, distance moyenne: 149.6 millions km => 14960 unités
+    float planetOrbitRadius = 14960.0f;
     addPlanet(glm::vec3(
-        mercuryOrbitRadius * cos(mercuryAngle), 
-        0.0f, 
-        mercuryOrbitRadius * sin(mercuryAngle)
-    ), 100.0f, glm::vec3(0.7f, 0.7f, 0.7f));
+        planetOrbitRadius * cos(planetAngle), 
+        0.0f, // Pas d'inclinaison orbitale
+        planetOrbitRadius * sin(planetAngle)
+    ), 0.637f, glm::vec3(0.2f, 0.6f, 1.0f)); // Couleur bleue comme la Terre
     
-    // Vénus (orange-jaune, moyen)
-    float venusOrbitRadius = 3500.0f;
-    addPlanet(glm::vec3(
-        venusOrbitRadius * cos(venusAngle), 
-        200.0f * sin(venusAngle * 2.0f), // Légère inclinaison orbitale
-        venusOrbitRadius * sin(venusAngle)
-    ), 200.0f, glm::vec3(1.0f, 0.7f, 0.3f));
+    // Aucune rotation pour les planètes (immobiles sur elles-mêmes)
+    // Le soleil n'a pas besoin de rotation non plus
+    m_planets[0]->setRotationSpeed(0.0f);  // Soleil sans rotation
+    m_planets[1]->setRotationSpeed(0.0f);  // Planète sans rotation
     
-    // Terre (bleu-vert, moyen)
-    float earthOrbitRadius = 5000.0f;
-    addPlanet(glm::vec3(
-        earthOrbitRadius * cos(earthAngle), 
-        100.0f * sin(earthAngle * 1.5f), // Légère inclinaison orbitale
-        earthOrbitRadius * sin(earthAngle)
-    ), 250.0f, glm::vec3(0.2f, 0.6f, 1.0f));
-    
-    // Mars (rouge, moyen)
-    float marsOrbitRadius = 7000.0f;
-    addPlanet(glm::vec3(
-        marsOrbitRadius * cos(marsAngle), 
-        -150.0f * sin(marsAngle * 1.8f), // Inclinaison orbitale différente
-        marsOrbitRadius * sin(marsAngle)
-    ), 150.0f, glm::vec3(0.8f, 0.3f, 0.2f));
-    
-    // Jupiter (orange-brun, très grand)
-    float jupiterOrbitRadius = 10000.0f;
-    addPlanet(glm::vec3(
-        jupiterOrbitRadius * cos(jupiterAngle), 
-        300.0f * sin(jupiterAngle * 0.8f), // Grande inclinaison orbitale
-        jupiterOrbitRadius * sin(jupiterAngle)
-    ), 500.0f, glm::vec3(0.9f, 0.6f, 0.3f));
-    
-    // Saturne (jaune-brun, grand)
-    float saturnOrbitRadius = 15000.0f;
-    addPlanet(glm::vec3(
-        saturnOrbitRadius * cos(saturnAngle), 
-        -250.0f * sin(saturnAngle * 1.2f), // Inclinaison orbitale
-        saturnOrbitRadius * sin(saturnAngle)
-    ), 400.0f, glm::vec3(0.9f, 0.8f, 0.5f));
-    
-    // Uranus (bleu-cyan, moyen)
-    float uranusOrbitRadius = 25000.0f;
-    addPlanet(glm::vec3(
-        uranusOrbitRadius * cos(uranusAngle), 
-        400.0f * sin(uranusAngle * 0.6f), // Forte inclinaison orbitale
-        uranusOrbitRadius * sin(uranusAngle)
-    ), 300.0f, glm::vec3(0.3f, 0.8f, 0.9f));
-    
-    // Neptune (bleu foncé, moyen)
-    float neptuneOrbitRadius = 35000.0f;
-    addPlanet(glm::vec3(
-        neptuneOrbitRadius * cos(neptuneAngle), 
-        -350.0f * sin(neptuneAngle * 0.9f), // Inclinaison orbitale
-        neptuneOrbitRadius * sin(neptuneAngle)
-    ), 280.0f, glm::vec3(0.2f, 0.4f, 0.9f));
-    
-    // Définir les rotations des planètes (vitesses ultra réduites pour un rendu très réaliste)
-    if (m_planets.size() >= 9) {
-        m_planets[0]->setRotationSpeed(0.0001f);  // Soleil - rotation extrêmement lente
-        m_planets[1]->setRotationSpeed(0.0005f);  // Mercure - rotation très lente
-        m_planets[2]->setRotationSpeed(-0.0009f); // Vénus - rotation rétrograde ultra lente
-        m_planets[3]->setRotationSpeed(0.0008f);  // Terre - rotation très lente
-        m_planets[3]->setRotationAxis(glm::vec3(0.1f, 1.0f, 0.0f)); // Terre légèrement inclinée
-        m_planets[4]->setRotationSpeed(0.0007f);  // Mars - rotation très lente
-        m_planets[5]->setRotationSpeed(0.0008f);  // Jupiter - rotation lente
-        m_planets[6]->setRotationSpeed(0.0001f);  // Saturne - rotation lente
-        m_planets[6]->setRotationAxis(glm::vec3(0.5f, 1.0f, 0.1f)); // Saturne inclinée
-        m_planets[7]->setRotationSpeed(-0.0001f); // Uranus - rotation rétrograde très lente
-        m_planets[7]->setRotationAxis(glm::vec3(0.9f, 0.4f, 0.0f)); // Uranus très inclinée
-        m_planets[8]->setRotationSpeed(0.0008f);  // Neptune - rotation très lente
-        
-        // Planètes supplémentaires
-        if (m_planets.size() >= 11) {
-            m_planets[9]->setRotationSpeed(0.0006f);
-            m_planets[9]->setRotationAxis(glm::vec3(0.3f, 1.0f, 0.7f));
-            m_planets[10]->setRotationSpeed(-0.0004f);
-            m_planets[10]->setRotationAxis(glm::vec3(0.8f, 0.2f, 1.0f));
-        }
-    }
-    
-    std::cout << "Created solar system with " << m_planets.size() << " celestial bodies" << std::endl;
+    std::cout << "Created simplified solar system with " << m_planets.size() << " celestial bodies at real scale (10km = 1 unit)" << std::endl;
 }
 
 // Compile un shader OpenGL avec vérification d'erreur
@@ -604,6 +596,55 @@ void Scene::processInput(GLFWwindow* window) {
     } else if (glfwGetKey(window, GLFW_KEY_F) == GLFW_RELEASE) {
         fKeyPressed = false;
     }
+    
+    // Contrôles du temps de simulation
+    static bool tKeyPressed = false;
+    if (glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS && !tKeyPressed) {
+        m_showTimeControls = !m_showTimeControls;
+        if (m_ui) {
+            m_ui->setShowTimeControls(m_showTimeControls);
+        }
+        
+        tKeyPressed = true;
+    } else if (glfwGetKey(window, GLFW_KEY_T) == GLFW_RELEASE) {
+        tKeyPressed = false;
+    }
+    
+    // Augmenter la vitesse de simulation (touche +)
+    static bool plusKeyPressed = false;
+    if ((glfwGetKey(window, GLFW_KEY_KP_ADD) == GLFW_PRESS || 
+         glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) && !plusKeyPressed) {
+        m_timeScale *= 2.0f;
+        // L'affichage de la vitesse se fait maintenant dans l'UI
+        plusKeyPressed = true;
+    } else if (glfwGetKey(window, GLFW_KEY_KP_ADD) == GLFW_RELEASE && 
+               glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_RELEASE) {
+        plusKeyPressed = false;
+    }
+    
+    // Diminuer la vitesse de simulation (touche -)
+    static bool minusKeyPressed = false;
+    if ((glfwGetKey(window, GLFW_KEY_KP_SUBTRACT) == GLFW_PRESS || 
+         glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_PRESS) && !minusKeyPressed) {
+        m_timeScale *= 0.5f;
+        // L'affichage de la vitesse se fait maintenant dans l'UI
+        minusKeyPressed = true;
+    } else if (glfwGetKey(window, GLFW_KEY_KP_SUBTRACT) == GLFW_RELEASE && 
+               glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_RELEASE) {
+        minusKeyPressed = false;
+    }
+    
+    // Réinitialiser la vitesse de simulation (touche 0)
+    static bool zeroKeyPressed = false;
+    if ((glfwGetKey(window, GLFW_KEY_KP_0) == GLFW_PRESS || 
+         glfwGetKey(window, GLFW_KEY_0) == GLFW_PRESS) && !zeroKeyPressed) {
+        m_timeScale = 1.0f;
+        // L'affichage de la vitesse se fait maintenant dans l'UI
+        zeroKeyPressed = true;
+    } else if (glfwGetKey(window, GLFW_KEY_KP_0) == GLFW_RELEASE && 
+               glfwGetKey(window, GLFW_KEY_0) == GLFW_RELEASE) {
+        zeroKeyPressed = false;
+    }
 }
 
 // Gère le mouvement de la souris pour la rotation de la caméra
@@ -645,8 +686,8 @@ void Scene::applyCameraCollision() {
         minSpeedMultiplier = std::min(minSpeedMultiplier, speedMultiplier);
         
         // Check if camera needs to be pushed away from this planet
-        // Limite l'approche à 0.11 unité de la surface (pas plus proche)
-        float minimumDistance = 0.11f; // Distance minimale à la surface
+        // Limite l'approche à 0.005 unité de la surface (environ 50 km à l'échelle réelle)
+        float minimumDistance = 0.005f; // Distance minimale à la surface
         glm::vec3 newPosition = planet->preventPenetration(correctedPosition, minimumDistance);
         if (glm::length(newPosition - correctedPosition) > 0.0001f) {
             correctedPosition = newPosition;
@@ -695,4 +736,12 @@ void Scene::clearPlanets() {
         planet->cleanup();
     }
     m_planets.clear();
+}
+
+// Initialise l'interface utilisateur avec une fenêtre GLFW
+void Scene::initializeUI(GLFWwindow* window) {
+    if (m_ui) {
+        m_ui->initialize(window);
+        m_ui->setShowTimeControls(m_showTimeControls);
+    }
 }

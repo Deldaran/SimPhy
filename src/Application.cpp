@@ -36,6 +36,9 @@ bool Application::initialize() {
     // Initialize scene
     m_scene->initialize();
     
+    // Initialize UI (après avoir initialisé la fenêtre et la scène)
+    m_scene->initializeUI(m_window->getHandle());
+    
     // Initialize debug window
     m_debugWindow->initialize();
     

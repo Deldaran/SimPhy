@@ -4,7 +4,7 @@
 
 Camera::Camera(glm::vec3 position, glm::vec3 up, float yaw, float pitch)
     : m_position(position), m_worldUp(up), m_yaw(yaw), m_pitch(pitch),
-      m_movementSpeed(50.0f), m_mouseSensitivity(0.1f), m_zoom(45.0f), m_speedMultiplier(1.0f),
+      m_movementSpeed(2000.0f), m_mouseSensitivity(0.1f), m_zoom(45.0f), m_speedMultiplier(1.0f),
       m_firstMouse(true), m_lastX(400.0f), m_lastY(300.0f) {
     updateCameraVectors();
 }
@@ -14,7 +14,7 @@ glm::mat4 Camera::getViewMatrix() const {
 }
 
 glm::mat4 Camera::getProjectionMatrix(float aspect) const {
-    return glm::perspective(glm::radians(m_zoom), aspect, 0.1f, 50000.0f);
+    return glm::perspective(glm::radians(m_zoom), aspect, 0.1f, 1000000.0f);
 }
 
 void Camera::processKeyboard(int direction, float deltaTime) {

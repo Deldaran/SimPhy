@@ -2,6 +2,11 @@
 #include <iostream>
 #include <cmath>
 #include <map>
+#include <string>
+#include <sstream>
+#include <limits>
+#include <algorithm>
+#include <iomanip>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -12,7 +17,8 @@ Planet::Planet(const glm::vec3& position, float radius, const glm::vec3& color)
     : m_position(position), m_radius(radius), m_color(color),
       m_rotationAxis(0.0f, 1.0f, 0.0f), m_rotationSpeed(0.0f), m_currentRotation(0.0f),
       m_VAO(0), m_VBO(0), m_EBO(0), m_sphereVertexCount(0), m_sphereIndexCount(0), m_culledIndexCount(0),
-      m_lastCameraPosition(0.0f), m_lodNeedsUpdate(true), m_lastLODUpdateTime(0.0f) {
+      m_lastCameraPosition(0.0f), m_lodNeedsUpdate(true), m_lastLODUpdateTime(0.0f),
+      m_noiseGenerated(false) {
 }
 
 // Destructeur de la planète - Libère les ressources
@@ -24,6 +30,9 @@ Planet::~Planet() {
 void Planet::initialize() {
     // Generate sphere geometry
     generateSphere();
+    
+    // Generate noise data once
+    generatePersistentNoise();
     
     // Generate OpenGL objects
     glGenVertexArrays(1, &m_VAO);
@@ -325,14 +334,14 @@ void Planet::rebuildMesh() {
         // Add position
         m_finalVertices.insert(m_finalVertices.end(), {vertex.x, vertex.y, vertex.z});
         
-        // Add color based only on planet's base color (no LOD color modification)
-        float normalizedHeight = (vertex.y / m_radius + 1.0f) * 0.5f; // 0 to 1
-        glm::vec3 baseColor = m_color;
+        // Utiliser le bruit persistant pour la couleur et la hauteur
+        NoiseData noiseData = getPersistedNoiseForPosition(vertex);
+        glm::vec3 baseColor = noiseData.color;
         
-        // Simple height-based variation to add visual interest
-        float r = baseColor.r * (0.8f + 0.2f * normalizedHeight);
-        float g = baseColor.g * (0.8f + 0.2f * normalizedHeight);
-        float b = baseColor.b * (0.8f + 0.2f * normalizedHeight);
+        // Utiliser directement les couleurs calculées et stockées précédemment
+        float r = baseColor.r;
+        float g = baseColor.g;
+        float b = baseColor.b;
         
         m_finalVertices.insert(m_finalVertices.end(), {r, g, b});
         
@@ -607,12 +616,14 @@ bool Planet::isTriangleInFrustum(const glm::vec3& v1, const glm::vec3& v2, const
     glm::vec4 clipV3 = viewProjection * glm::vec4(v3, 1.0f);
     
     // Test simple : si tous les vertices sont derrière la caméra (z négatif en view space)
+    // Mais avec une marge pour éviter la disparition trop brusque
     glm::vec4 viewV1 = view * glm::vec4(v1, 1.0f);
     glm::vec4 viewV2 = view * glm::vec4(v2, 1.0f);
     glm::vec4 viewV3 = view * glm::vec4(v3, 1.0f);
     
-    if (viewV1.z > 0.0f && viewV2.z > 0.0f && viewV3.z > 0.0f) {
-        return false; // Triangle complètement derrière la caméra
+    const float cullMargin = 2.0f; // Marge pour éviter le culling trop agressif
+    if (viewV1.z > cullMargin && viewV2.z > cullMargin && viewV3.z > cullMargin) {
+        return false; // Triangle complètement derrière la caméra avec marge
     }
     
     // Diviser par w pour obtenir les coordonnées normalisées (NDC)
@@ -645,7 +656,9 @@ bool Planet::isTriangleInFrustum(const glm::vec3& v1, const glm::vec3& v2, const
     }
     
     // Si les limites intersectent le frustum, le triangle peut être visible
-    return !(maxX < -1.0f || minX > 1.0f || maxY < -1.0f || minY > 1.0f);
+    // Ajout d'une marge pour éviter le culling trop agressif
+    float margin = 0.5f;
+    return !(maxX < -1.0f - margin || minX > 1.0f + margin || maxY < -1.0f - margin || minY > 1.0f + margin);
 }
 
 // Calcule la normale d'un triangle
@@ -666,4 +679,123 @@ glm::vec3 Planet::calculateTriangleNormal(const glm::vec3& v1, const glm::vec3& 
     }
     
     return normal;
+}
+
+// Génère et stocke le bruit pour toute la planète une seule fois
+void Planet::generatePersistentNoise() {
+    if (m_noiseGenerated) return; // Ne pas régénérer si déjà fait
+    
+    m_persistentNoise.clear();
+    
+    // Pour chaque vertex de base de l'icosaèdre
+    for (const auto& vertex : m_vertices) {
+        // Normalisation pour avoir un point sur la surface de la sphère
+        glm::vec3 normalizedPos = glm::normalize(vertex);
+        
+        // Clé unique pour cette position (utiliser une précision limitée pour éviter les duplications dues à l'imprécision numérique)
+        // Utiliser stringstream au lieu de to_string
+        std::ostringstream keyStream;
+        keyStream << int(normalizedPos.x * 10000) << "_" 
+                  << int(normalizedPos.y * 10000) << "_" 
+                  << int(normalizedPos.z * 10000);
+        std::string key = keyStream.str();
+        
+        // Vérifier si on a déjà calculé le bruit pour cette position
+        if (m_persistentNoise.find(key) != m_persistentNoise.end()) {
+            continue;
+        }
+        
+        // Calcul du bruit pour cette position
+        NoiseData noiseData;
+        
+        // Génération du bruit de Perlin simplifié (peut être remplacé par une autre méthode de bruit)
+        float noise1 = sin(normalizedPos.x * 5.0f) * cos(normalizedPos.y * 5.0f) * 0.5f + 0.5f;
+        float noise2 = cos(normalizedPos.z * 7.0f) * sin(normalizedPos.x * 7.0f) * 0.5f + 0.5f;
+        float noise3 = sin(normalizedPos.y * 9.0f) * cos(normalizedPos.z * 9.0f) * 0.5f + 0.5f;
+        
+        float combinedNoise = (noise1 * 0.5f + noise2 * 0.3f + noise3 * 0.2f);
+        
+        // Hauteur du terrain (0-1)
+        noiseData.height = combinedNoise;
+        
+        // Couleur basée sur la hauteur et la couleur de base
+        float heightFactor = combinedNoise * 0.3f + 0.7f; // Limiter l'effet pour une variation subtile
+        noiseData.color = m_color * heightFactor;
+        
+        // Stocker dans la map
+        m_persistentNoise[key] = noiseData;
+    }
+    
+    // Marquer le bruit comme généré
+    m_noiseGenerated = true;
+    
+    std::cout << "Generated and stored persistent noise for planet at " << m_position.x 
+              << ", " << m_position.y << ", " << m_position.z << std::endl;
+}
+
+// Récupère le bruit stocké pour une position donnée
+Planet::NoiseData Planet::getPersistedNoiseForPosition(const glm::vec3& position) const {
+    // Normalisation pour avoir un point sur la surface de la sphère
+    glm::vec3 normalizedPos = glm::normalize(position);
+    
+    // Clé unique pour cette position
+    // Utiliser stringstream au lieu de to_string
+    std::ostringstream keyStream;
+    keyStream << int(normalizedPos.x * 10000) << "_" 
+              << int(normalizedPos.y * 10000) << "_" 
+              << int(normalizedPos.z * 10000);
+    std::string key = keyStream.str();
+    
+    // Rechercher dans la map
+    auto it = m_persistentNoise.find(key);
+    
+    // Si on trouve la valeur exacte, la retourner
+    if (it != m_persistentNoise.end()) {
+        return it->second;
+    }
+    
+    // Sinon chercher le point le plus proche (interpolation simple)
+    float closestDistance = std::numeric_limits<float>::max();
+    NoiseData closestNoise;
+    closestNoise.height = 0.0f;
+    closestNoise.color = m_color;
+    
+    for (const auto& entry : m_persistentNoise) {
+        // Reconstruire la position à partir de la clé en parsant manuellement
+        const std::string& keyStr = entry.first;
+        size_t firstUnderscore = keyStr.find('_');
+        size_t secondUnderscore = keyStr.find('_', firstUnderscore + 1);
+        
+        // Valeurs par défaut
+        glm::vec3 storedPos(0.0f, 0.0f, 0.0f);
+        
+        // Extraction manuelle des coordonnées
+        if (firstUnderscore != std::string::npos && secondUnderscore != std::string::npos) {
+            std::string xStr = keyStr.substr(0, firstUnderscore);
+            std::string yStr = keyStr.substr(firstUnderscore + 1, secondUnderscore - firstUnderscore - 1);
+            std::string zStr = keyStr.substr(secondUnderscore + 1);
+            
+            // Conversion manuelle en nombres
+            int xVal = 0, yVal = 0, zVal = 0;
+            std::istringstream(xStr) >> xVal;
+            std::istringstream(yStr) >> yVal;
+            std::istringstream(zStr) >> zVal;
+            
+            storedPos = glm::vec3(
+                float(xVal) / 10000.0f,
+                float(yVal) / 10000.0f,
+                float(zVal) / 10000.0f
+            );
+        }
+        
+        float distance = glm::length(normalizedPos - storedPos);
+        
+        if (distance < closestDistance) {
+            closestDistance = distance;
+            closestNoise = entry.second;
+        }
+    }
+    
+    // Retourner la valeur du point le plus proche
+    return closestNoise;
 }

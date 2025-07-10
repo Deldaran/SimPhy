@@ -10,12 +10,15 @@
 #include <functional>
 #include "Camera.h"
 #include "Planet.h"
+#include "UI.h"
 
 class Scene {
 private:
     glm::vec3 m_backgroundColor;        // Couleur de fond de la scène
     float m_lastFrame;                  // Temps du dernier frame
     float m_deltaTime;                  // Temps écoulé depuis le dernier frame
+    float m_timeScale;                  // Facteur d'échelle de temps (vitesse de simulation)
+    bool m_showTimeControls;            // Affiche les contrôles de temps
     
     // Objets OpenGL
     unsigned int m_shaderProgram;       // Programme shader pour le rendu
@@ -35,6 +38,9 @@ private:
     
     // Caméra
     std::unique_ptr<Camera> m_camera;   // Caméra de la scène
+    
+    // UI
+    std::unique_ptr<UI> m_ui;           // Interface utilisateur
     
     // Méthodes privées
     void setupShaders();                        // Configure les shaders de rendu
@@ -60,6 +66,9 @@ public:
     void processMouseMovement(float xoffset, float yoffset);  // Gère le mouvement de la souris
     void setWireframeMode(bool enabled);                 // Active/désactive le mode wireframe
     Camera* getCamera() { return m_camera.get(); }      // Retourne la caméra
+    
+    // Initialise l'interface utilisateur avec une fenêtre GLFW
+    void initializeUI(GLFWwindow* window);
     
     // Gestion des planètes
     void addPlanet(const glm::vec3& position, float radius, const glm::vec3& color = glm::vec3(1.0f, 1.0f, 1.0f));  // Ajoute une planète

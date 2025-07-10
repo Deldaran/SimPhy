@@ -51,6 +51,14 @@ private:
     bool m_lodNeedsUpdate;              // Le LOD nécessite une mise à jour
     float m_lastLODUpdateTime;          // Temps de la dernière mise à jour LOD
     
+    // Gestion du bruit persistant pour le terrain
+    struct NoiseData {
+        float height;
+        glm::vec3 color;
+    };
+    std::unordered_map<std::string, NoiseData> m_persistentNoise;
+    bool m_noiseGenerated;
+    
     // Méthodes privées
     void generateSphere();                      // Génère la géométrie sphérique
     void updateDynamicLOD(Camera* camera);      // Met à jour le système LOD
@@ -63,6 +71,8 @@ private:
     glm::vec3 getTriangleCenter(const Triangle& triangle);  // Centre d'un triangle
     glm::vec3 calculateTriangleNormal(const glm::vec3& v1, const glm::vec3& v2, const glm::vec3& v3); // Calcule la normale
     float getDistanceToCamera(const glm::vec3& point, Camera* camera);  // Distance à la caméra
+    void generatePersistentNoise();                // Génère et stocke le bruit une seule fois
+    NoiseData getPersistedNoiseForPosition(const glm::vec3& position) const; // Obtient le bruit stocké pour une position donnée
     
 public:
     Planet(const glm::vec3& position, float radius, const glm::vec3& color = glm::vec3(1.0f, 1.0f, 1.0f)); // Constructeur
