@@ -13,6 +13,49 @@
 
 class Planet {
 private:
+    // --- Quadtree sphérique pour LOD progressif ---
+    struct QuadNode {
+        // Coordonnées locales sur la face (u, v dans [0,1])
+        glm::vec2 minUV, maxUV;
+        int level; // Niveau de subdivision
+        int faceIndex; // 0-5 (face du cube)
+        bool isLeaf;
+        float morphFactor; // Pour geomorphing
+        glm::vec3 patchCenter; // Centre du patch sur la sphère
+        // GPU mesh data (VBO/IBO ou SSBO, etc.)
+        unsigned int vbo = 0, ibo = 0, vao = 0;
+        int indexCount = 0;
+        // Enfants (nullptr si feuille)
+        std::unique_ptr<QuadNode> children[4];
+        // Méthodes utilitaires
+        bool isVisible = true; // Pour le culling
+        QuadNode(glm::vec2 minUV, glm::vec2 maxUV, int level, int faceIndex)
+            : minUV(minUV), maxUV(maxUV), level(level), faceIndex(faceIndex), isLeaf(true), morphFactor(0.0f) {}
+    };
+
+    // --- Utilitaires quadtree sphérique (déclarés ici pour linkage correct) ---
+    glm::vec3 getPatchCenter(const QuadNode& node);
+    void getChildUV(const QuadNode& parent, int childIdx, glm::vec2& outMin, glm::vec2& outMax);
+    glm::vec3 cubeFaceUVToXYZ(int face, const glm::vec2& uv);
+    // 6 racines (une par face du cube)
+    std::unique_ptr<QuadNode> m_cubeFaces[6];
+
+    // Paramètres LOD
+    int m_maxLODLevel = 10; // Profondeur max du quadtree
+    float m_splitDistance = 2.0f; // Distance écran/caméra pour subdiviser
+
+    // Initialisation du quadtree sphérique
+    void initializeQuadtree();
+    void updateQuadtreeLOD(Camera* camera);
+    void renderQuadtree(unsigned int shaderProgram, Camera* camera, float aspectRatio);
+    void destroyQuadtree();
+
+    // Génération dynamique GPU d'un patch (compute shader)
+    void generatePatchMeshGPU(QuadNode& node);
+
+    // Geomorphing (transition lisse entre niveaux)
+    float computeMorphFactor(const QuadNode& node, Camera* camera);
+
     // Propriétés de la planète
     glm::vec3 m_position;               // Position dans l'espace
     float m_radius;                     // Rayon de la planète
@@ -77,6 +120,12 @@ private:
 public:
     Planet(const glm::vec3& position, float radius, const glm::vec3& color = glm::vec3(1.0f, 1.0f, 1.0f)); // Constructeur
     ~Planet();                                          // Destructeur
+
+    // --- Interface Quadtree sphérique ---
+    void initializeLOD(); // Initialise le quadtree sphérique et les patches
+    void updateLOD(Camera* camera); // Met à jour le LOD dynamiquement
+    void renderLOD(unsigned int shaderProgram, Camera* camera, float aspectRatio); // Rendu LOD
+    void cleanupLOD(); // Libère les ressources du quadtree
     
     void initialize();                                  // Initialise la planète
     void render(unsigned int shaderProgram, Camera* camera, float aspectRatio); // Effectue le rendu

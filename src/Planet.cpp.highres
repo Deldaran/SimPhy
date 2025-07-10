@@ -1,0 +1,103 @@
+// Génère le maillage haute résolution une seule fois
+void Planet::generateHighResMesh() {
+    if (m_highResMeshGenerated) {
+        return; // Ne pas régénérer si déjà fait
+    }
+    
+    std::cout << "Generating high-resolution mesh for planet..." << std::endl;
+    
+    m_highResVertices.clear();
+    m_highResIndices.clear();
+    
+    // Create an unordered_map to avoid duplicate vertices
+    std::unordered_map<glm::vec3, int, Vec3Hash, Vec3Equal> vertexMap;
+    std::vector<glm::vec3> vertexPositions;
+    
+    // Helper function to add vertex and return its index
+    auto addVertex = [&](const glm::vec3& pos) -> int {
+        // Normalize position to sphere surface
+        glm::vec3 normalizedPos = glm::normalize(pos) * m_radius;
+        
+        auto it = vertexMap.find(normalizedPos);
+        if (it != vertexMap.end()) {
+            return it->second;
+        }
+        
+        int index = static_cast<int>(vertexPositions.size());
+        vertexPositions.push_back(normalizedPos);
+        vertexMap[normalizedPos] = index;
+        return index;
+    };
+    
+    // Récupérer les triangles de base (icosaèdre)
+    std::vector<unsigned int> baseIndices = {
+        // 5 faces around point 0
+        0, 11, 5,  0, 5, 1,  0, 1, 7,  0, 7, 10,  0, 10, 11,
+        
+        // 5 adjacent faces
+        1, 5, 9,  5, 11, 4,  11, 10, 2,  10, 7, 6,  7, 1, 8,
+        
+        // 5 faces around point 3
+        3, 9, 4,  3, 4, 2,  3, 2, 6,  3, 6, 8,  3, 8, 9,
+        
+        // 5 adjacent faces
+        4, 9, 5,  2, 4, 11,  6, 2, 10,  8, 6, 7,  9, 8, 1
+    };
+    
+    // Assurons-nous que le bruit est généré avant de créer le maillage haute résolution
+    if (!m_noiseGenerated) {
+        generatePersistentNoise();
+    }
+    
+    // Subdiviser chaque triangle à un niveau très élevé (niveau 12 = très détaillé)
+    const int HIGH_RES_SUBDIVISION_LEVEL = 12;
+    
+    // Pour chaque triangle de base, subdiviser récursivement
+    for (size_t i = 0; i < baseIndices.size(); i += 3) {
+        glm::vec3 v1 = m_vertices[baseIndices[i]];
+        glm::vec3 v2 = m_vertices[baseIndices[i + 1]];
+        glm::vec3 v3 = m_vertices[baseIndices[i + 2]];
+        
+        // Subdiviser ce triangle avec le niveau maximal
+        subdivideTriangleRecursive(v1, v2, v3, 0, HIGH_RES_SUBDIVISION_LEVEL, addVertex);
+    }
+    
+    // Maintenant, construire le maillage final avec les positions et les normales
+    for (const auto& pos : vertexPositions) {
+        glm::vec3 normal = glm::normalize(pos); // La normale est simplement la position normalisée (pour une sphère)
+        
+        // Position
+        m_highResVertices.push_back(pos.x);
+        m_highResVertices.push_back(pos.y);
+        m_highResVertices.push_back(pos.z);
+        
+        // Récupérer les données de bruit pour ce point
+        NoiseData noiseData = getPersistedNoiseForPosition(normal);
+        
+        // Déformer le rayon avec le bruit de terrain
+        float heightFactor = 0.05f; // 5% de variation de hauteur
+        float terrainHeight = 1.0f + (noiseData.height - 0.5f) * 2.0f * heightFactor;
+        
+        // Position ajustée avec le bruit
+        glm::vec3 adjustedPos = normal * m_radius * terrainHeight;
+        
+        // Remplacer la position par la position ajustée
+        m_highResVertices[m_highResVertices.size() - 3] = adjustedPos.x;
+        m_highResVertices[m_highResVertices.size() - 2] = adjustedPos.y;
+        m_highResVertices[m_highResVertices.size() - 1] = adjustedPos.z;
+        
+        // Couleur (utilisez la couleur du bruit)
+        m_highResVertices.push_back(noiseData.color.r);
+        m_highResVertices.push_back(noiseData.color.g);
+        m_highResVertices.push_back(noiseData.color.b);
+        
+        // Normale (recalculer après déformation)
+        glm::vec3 adjustedNormal = normal; // Pour une petite déformation, on peut garder la normale originale
+        m_highResVertices.push_back(adjustedNormal.x);
+        m_highResVertices.push_back(adjustedNormal.y);
+        m_highResVertices.push_back(adjustedNormal.z);
+    }
+    
+    std::cout << "High-resolution mesh generated with " << vertexPositions.size() << " vertices" << std::endl;
+    m_highResMeshGenerated = true;
+}

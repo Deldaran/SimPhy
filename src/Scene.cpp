@@ -25,20 +25,24 @@ const char* vertexShaderSource = R"(
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aColor;
 layout (location = 2) in vec3 aNormal;
+layout (location = 3) in float aMorph;
 
 out vec3 vertexColor;
 out vec3 worldPos;
 out vec3 normal;
+out float morphFactor;
 
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
+uniform float patchMorph = 0.0;
 
 void main() {
     worldPos = vec3(model * vec4(aPos, 1.0));
     normal = mat3(transpose(inverse(model))) * aNormal;
     gl_Position = projection * view * model * vec4(aPos, 1.0);
     vertexColor = aColor;
+    morphFactor = patchMorph + aMorph; // aMorph=0 par défaut, patchMorph pour le LOD
 }
 )";
 
@@ -48,6 +52,7 @@ const char* fragmentShaderSource = R"(
 in vec3 vertexColor;
 in vec3 worldPos;
 in vec3 normal;
+in float morphFactor;
 
 out vec4 FragColor;
 
@@ -126,6 +131,8 @@ void main() {
         vec3 specular = spec * lightColor * 0.5 * lightIntensity;
         
         vec3 result = ambient + diffuse + specular;
+        // --- Geomorphing LOD: fondu entre niveaux (optionnel, ici simple modulation de la couleur) ---
+        result = mix(result, vec3(1.0,0.0,1.0), morphFactor*0.1); // Debug: teinte violette si morphing
         FragColor = vec4(result, 1.0);
     }
 }
@@ -321,13 +328,12 @@ void Scene::render() {
         glUniform1f(glGetUniformLocation(m_shaderProgram, "sunRadius"), sunRadius);
     }
     
-    // Render all planets
+    // Rendu LOD sphérique pour chaque planète
     for (size_t i = 0; i < m_planets.size(); ++i) {
-        // Set if this is the sun (first planet)
         bool isSun = (i == 0);
         glUniform1i(glGetUniformLocation(m_shaderProgram, "isSun"), isSun ? 1 : 0);
-        
-        m_planets[i]->render(m_shaderProgram, m_camera.get(), 1440.0f / 900.0f);
+        m_planets[i]->updateLOD(m_camera.get());
+        m_planets[i]->renderLOD(m_shaderProgram, m_camera.get(), 1440.0f / 900.0f);
     }
     
     // Finir le rendu ImGui après avoir dessiné les planètes

@@ -19,11 +19,16 @@ Planet::Planet(const glm::vec3& position, float radius, const glm::vec3& color)
       m_VAO(0), m_VBO(0), m_EBO(0), m_sphereVertexCount(0), m_sphereIndexCount(0), m_culledIndexCount(0),
       m_lastCameraPosition(0.0f), m_lodNeedsUpdate(true), m_lastLODUpdateTime(0.0f),
       m_noiseGenerated(false) {
+    // Initialisation des racines du quadtree sphérique (6 faces du cube)
+    for (int i = 0; i < 6; ++i) {
+        m_cubeFaces[i] = nullptr;
+    }
 }
 
 // Destructeur de la planète - Libère les ressources
 Planet::~Planet() {
     cleanup();
+    cleanupLOD();
 }
 
 // Initialise la planète - Génère la géométrie et configure OpenGL
@@ -41,6 +46,208 @@ void Planet::initialize() {
     
     std::cout << "Planet initialized at position (" << m_position.x << ", " << m_position.y << ", " << m_position.z 
               << ") with radius " << m_radius << std::endl;
+
+    // Initialisation du quadtree sphérique LOD
+    initializeLOD();
+}
+// --- Quadtree sphérique LOD ---
+// Initialisation du quadtree sphérique (6 faces du cube, chaque face = racine du quadtree)
+void Planet::initializeLOD() {
+    destroyQuadtree();
+    // Pour chaque face du cube (0 à 5)
+    for (int face = 0; face < 6; ++face) {
+        // minUV = (0,0), maxUV = (1,1), niveau 0
+        m_cubeFaces[face] = std::make_unique<QuadNode>(glm::vec2(0.0f), glm::vec2(1.0f), 0, face);
+        // Générer le mesh initial du patch racine
+        generatePatchMeshGPU(*m_cubeFaces[face]);
+    }
+}
+
+// Nettoyage du quadtree sphérique (libère les buffers GPU)
+void Planet::destroyQuadtree() {
+    for (int face = 0; face < 6; ++face) {
+        if (m_cubeFaces[face]) {
+            // Libère récursivement les buffers
+            std::function<void(QuadNode*)> cleanupNode = [&](QuadNode* node) {
+                if (!node) return;
+                if (node->vao) glDeleteVertexArrays(1, &node->vao);
+                if (node->vbo) glDeleteBuffers(1, &node->vbo);
+                if (node->ibo) glDeleteBuffers(1, &node->ibo);
+                for (auto& child : node->children) cleanupNode(child.get());
+            };
+            cleanupNode(m_cubeFaces[face].get());
+            m_cubeFaces[face] = nullptr;
+        }
+    }
+}
+
+// Interface publique pour nettoyage LOD
+void Planet::cleanupLOD() {
+    destroyQuadtree();
+}
+
+// Mise à jour dynamique du quadtree LOD (subdivision/suppression selon la caméra)
+void Planet::updateLOD(Camera* camera) {
+    // Pour chaque face du cube
+    for (int face = 0; face < 6; ++face) {
+        if (!m_cubeFaces[face]) continue;
+        // Mise à jour récursive
+        std::function<void(QuadNode&)> updateNode = [&](QuadNode& node) {
+            // Calcul du centre du patch sur la sphère
+            node.patchCenter = getPatchCenter(node);
+            float dist = glm::length(camera->getPosition() - (m_position + node.patchCenter * m_radius));
+            // Critère de subdivision (distance écran/caméra)
+            bool shouldSplit = (node.level < m_maxLODLevel) && (dist < m_splitDistance * pow(0.5, node.level));
+            if (shouldSplit && node.isLeaf) {
+                // Subdiviser en 4 enfants
+                for (int i = 0; i < 4; ++i) {
+                    glm::vec2 minUV, maxUV;
+                    getChildUV(node, i, minUV, maxUV);
+                    node.children[i] = std::make_unique<QuadNode>(minUV, maxUV, node.level + 1, node.faceIndex);
+                    generatePatchMeshGPU(*node.children[i]);
+                }
+                node.isLeaf = false;
+            } else if (!shouldSplit && !node.isLeaf) {
+                // Supprimer les enfants (fusion)
+                for (auto& child : node.children) child.reset();
+                node.isLeaf = true;
+            }
+            // Mise à jour récursive des enfants
+            if (!node.isLeaf) for (auto& child : node.children) updateNode(*child);
+            // Calcul du morph factor pour geomorphing
+            node.morphFactor = computeMorphFactor(node, camera);
+        };
+        updateNode(*m_cubeFaces[face]);
+    }
+}
+
+// Rendu récursif du quadtree sphérique (ne dessine que les patches visibles)
+void Planet::renderLOD(unsigned int shaderProgram, Camera* camera, float aspectRatio) {
+    // Matrices
+    glm::mat4 model = getModelMatrix();
+    glm::mat4 view = camera->getViewMatrix();
+    glm::mat4 projection = camera->getProjectionMatrix(aspectRatio);
+    glUseProgram(shaderProgram);
+    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, &model[0][0]);
+    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, &view[0][0]);
+    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, &projection[0][0]);
+    // Pour chaque face du cube
+    for (int face = 0; face < 6; ++face) {
+        if (!m_cubeFaces[face]) continue;
+        // Rendu récursif
+        std::function<void(QuadNode&)> renderNode = [&](QuadNode& node) {
+            if (node.isVisible) {
+                glBindVertexArray(node.vao);
+                // Passe le morph factor du patch en uniform
+                glUniform1f(glGetUniformLocation(shaderProgram, "patchMorph"), node.morphFactor);
+                glDrawElements(GL_TRIANGLES, node.indexCount, GL_UNSIGNED_INT, 0);
+                glBindVertexArray(0);
+            }
+            if (!node.isLeaf) for (auto& child : node.children) renderNode(*child);
+        };
+        renderNode(*m_cubeFaces[face]);
+    }
+}
+
+// --- Utilitaires quadtree sphérique ---
+// Calcule le centre du patch sur la sphère (cube -> sphère)
+glm::vec3 Planet::getPatchCenter(const QuadNode& node) {
+    // Calcul du centre UV
+    glm::vec2 uv = (node.minUV + node.maxUV) * 0.5f;
+    // Projeter sur la face du cube
+    glm::vec3 cubePos = cubeFaceUVToXYZ(node.faceIndex, uv);
+    // Projeter sur la sphère
+    return glm::normalize(cubePos);
+}
+
+// Donne les UV d'un enfant (0: bas-gauche, 1: bas-droit, 2: haut-gauche, 3: haut-droit)
+void Planet::getChildUV(const QuadNode& parent, int childIdx, glm::vec2& outMin, glm::vec2& outMax) {
+    glm::vec2 mid = (parent.minUV + parent.maxUV) * 0.5f;
+    switch (childIdx) {
+        case 0: outMin = parent.minUV; outMax = mid; break;
+        case 1: outMin = glm::vec2(mid.x, parent.minUV.y); outMax = glm::vec2(parent.maxUV.x, mid.y); break;
+        case 2: outMin = glm::vec2(parent.minUV.x, mid.y); outMax = glm::vec2(mid.x, parent.maxUV.y); break;
+        case 3: outMin = mid; outMax = parent.maxUV; break;
+    }
+}
+
+// Conversion UV (face du cube) -> position 3D sur le cube
+glm::vec3 Planet::cubeFaceUVToXYZ(int face, const glm::vec2& uv) {
+    float u = uv.x * 2.0f - 1.0f;
+    float v = uv.y * 2.0f - 1.0f;
+    switch (face) {
+        case 0: return glm::vec3(1, v, -u);   // +X
+        case 1: return glm::vec3(-1, v, u);   // -X
+        case 2: return glm::vec3(u, 1, -v);   // +Y
+        case 3: return glm::vec3(u, -1, v);   // -Y
+        case 4: return glm::vec3(u, v, 1);    // +Z
+        case 5: return glm::vec3(-u, v, -1);  // -Z
+    }
+    return glm::vec3(0);
+}
+
+// Génération dynamique du mesh d'un patch (GPU, compute shader ou CPU fallback)
+void Planet::generatePatchMeshGPU(QuadNode& node) {
+    // Pour la démo, on génère un quad subdivisé en CPU (remplacer par compute shader pour la version finale)
+    const int resolution = 16 * (1 << node.level); // Plus de subdivisions pour les niveaux élevés
+    std::vector<float> vertexData; // pos(3) + color(3) + normal(3) + morph(1)
+    std::vector<unsigned int> indices;
+    for (int y = 0; y <= resolution; ++y) {
+        for (int x = 0; x <= resolution; ++x) {
+            glm::vec2 uv = glm::mix(node.minUV, node.maxUV, glm::vec2(x / float(resolution), y / float(resolution)));
+            glm::vec3 pos = glm::normalize(cubeFaceUVToXYZ(node.faceIndex, uv)) * m_radius;
+            // Couleur et bruit (optionnel, ici couleur de base)
+            glm::vec3 color = m_color;
+            glm::vec3 normal = glm::normalize(pos);
+            float morph = node.morphFactor;
+            vertexData.push_back(pos.x); vertexData.push_back(pos.y); vertexData.push_back(pos.z);
+            vertexData.push_back(color.r); vertexData.push_back(color.g); vertexData.push_back(color.b);
+            vertexData.push_back(normal.x); vertexData.push_back(normal.y); vertexData.push_back(normal.z);
+            vertexData.push_back(morph);
+        }
+    }
+    for (int y = 0; y < resolution; ++y) {
+        for (int x = 0; x < resolution; ++x) {
+            int i0 = y * (resolution + 1) + x;
+            int i1 = i0 + 1;
+            int i2 = i0 + (resolution + 1);
+            int i3 = i2 + 1;
+            indices.push_back(i0); indices.push_back(i2); indices.push_back(i1);
+            indices.push_back(i1); indices.push_back(i2); indices.push_back(i3);
+        }
+    }
+    // Génération des buffers OpenGL
+    if (node.vao) glDeleteVertexArrays(1, &node.vao);
+    if (node.vbo) glDeleteBuffers(1, &node.vbo);
+    if (node.ibo) glDeleteBuffers(1, &node.ibo);
+    glGenVertexArrays(1, &node.vao);
+    glGenBuffers(1, &node.vbo);
+    glGenBuffers(1, &node.ibo);
+    glBindVertexArray(node.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, node.vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertexData.size() * sizeof(float), vertexData.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, node.ibo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
+    // Attributs : pos(0), color(1), normal(2), morph(3)
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 10 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 10 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 10 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, 10 * sizeof(float), (void*)(9 * sizeof(float)));
+    glEnableVertexAttribArray(3);
+    glBindVertexArray(0);
+    node.indexCount = static_cast<int>(indices.size());
+}
+
+// Calcul du morph factor pour geomorphing (transition lisse entre niveaux)
+float Planet::computeMorphFactor(const QuadNode& node, Camera* camera) {
+    // Simple : morph = 1 quand proche du split, 0 sinon
+    float dist = glm::length(camera->getPosition() - (m_position + node.patchCenter * m_radius));
+    float splitDist = m_splitDistance * pow(0.5, node.level);
+    float morph = glm::clamp((splitDist - dist) / (splitDist * 0.5f), 0.0f, 1.0f);
+    return morph;
 }
 
 // Génère la géométrie sphérique avec système LOD dynamique
@@ -520,61 +727,16 @@ glm::mat4 Planet::getModelMatrix() const {
 // Effectue le culling des triangles pour optimiser le rendu
 void Planet::performCulling(Camera* camera, float aspectRatio) {
     m_culledIndices.clear();
-    
-    int totalTriangles = 0;
-    int culledTriangles = 0;
-    int backfaceCulled = 0;
-    int frustumCulled = 0;
-    
-    glm::vec3 cameraPos = camera->getPosition();
-    glm::mat4 modelMatrix = getModelMatrix();
-    
-    // Process triangles in groups of 3 indices (one triangle)
+    // Désactivation totale du culling : tous les triangles sont visibles
     for (size_t i = 0; i < m_finalIndices.size(); i += 3) {
-        totalTriangles++;
-        
-        // Get vertex indices
         unsigned int i1 = m_finalIndices[i];
         unsigned int i2 = m_finalIndices[i + 1];
         unsigned int i3 = m_finalIndices[i + 2];
-        
-        // Convert vertex buffer indices to positions (each vertex has 6 floats: xyz + rgb)
-        glm::vec3 v1(m_finalVertices[i1 * 9], m_finalVertices[i1 * 9 + 1], m_finalVertices[i1 * 9 + 2]);
-        glm::vec3 v2(m_finalVertices[i2 * 9], m_finalVertices[i2 * 9 + 1], m_finalVertices[i2 * 9 + 2]);
-        glm::vec3 v3(m_finalVertices[i3 * 9], m_finalVertices[i3 * 9 + 1], m_finalVertices[i3 * 9 + 2]);
-        
-        // Transform vertices to world space
-        glm::vec4 worldV1 = modelMatrix * glm::vec4(v1, 1.0f);
-        glm::vec4 worldV2 = modelMatrix * glm::vec4(v2, 1.0f);
-        glm::vec4 worldV3 = modelMatrix * glm::vec4(v3, 1.0f);
-        
-        glm::vec3 wv1 = glm::vec3(worldV1);
-        glm::vec3 wv2 = glm::vec3(worldV2);
-        glm::vec3 wv3 = glm::vec3(worldV3);
-        
-        // Backface culling - vérifier si le triangle fait face à la caméra
-        if (isBackfacing(wv1, wv2, wv3, cameraPos)) {
-            backfaceCulled++;
-            culledTriangles++;
-            continue;
-        }
-        
-        // Frustum culling - vérifier si le triangle est dans le champ de vision
-        if (!isTriangleInFrustum(wv1, wv2, wv3, camera, aspectRatio)) {
-            frustumCulled++;
-            culledTriangles++;
-            continue;
-        }
-        
-        // Triangle is visible, add to culled indices
         m_culledIndices.push_back(i1);
         m_culledIndices.push_back(i2);
         m_culledIndices.push_back(i3);
     }
-    
     m_culledIndexCount = static_cast<int>(m_culledIndices.size());
-    
-    // Update OpenGL Element Buffer with culled indices
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_culledIndices.size() * sizeof(unsigned int), 
                  m_culledIndices.data(), GL_DYNAMIC_DRAW);
@@ -604,60 +766,36 @@ bool Planet::isBackfacing(const glm::vec3& v1, const glm::vec3& v2, const glm::v
 bool Planet::isTriangleInFrustum(const glm::vec3& v1, const glm::vec3& v2, const glm::vec3& v3, Camera* camera, float aspectRatio) {
     glm::vec3 cameraPos = camera->getPosition();
     glm::vec3 cameraFront = camera->getFront();
-    
-    // Calculer les matrices de la caméra
     glm::mat4 view = camera->getViewMatrix();
     glm::mat4 projection = camera->getProjectionMatrix(aspectRatio);
     glm::mat4 viewProjection = projection * view;
-    
-    // Transformer chaque vertex du triangle en espace de clip
     glm::vec4 clipV1 = viewProjection * glm::vec4(v1, 1.0f);
     glm::vec4 clipV2 = viewProjection * glm::vec4(v2, 1.0f);
     glm::vec4 clipV3 = viewProjection * glm::vec4(v3, 1.0f);
-    
-    // Test simple : si tous les vertices sont derrière la caméra (z négatif en view space)
-    // Mais avec une marge pour éviter la disparition trop brusque
     glm::vec4 viewV1 = view * glm::vec4(v1, 1.0f);
     glm::vec4 viewV2 = view * glm::vec4(v2, 1.0f);
     glm::vec4 viewV3 = view * glm::vec4(v3, 1.0f);
-    
-    const float cullMargin = 2.0f; // Marge pour éviter le culling trop agressif
+    // Marge très large pour éviter le culling trop agressif en approche
+    const float cullMargin = 20.0f; // Était 2.0f, maintenant 20.0f
     if (viewV1.z > cullMargin && viewV2.z > cullMargin && viewV3.z > cullMargin) {
         return false; // Triangle complètement derrière la caméra avec marge
     }
-    
-    // Diviser par w pour obtenir les coordonnées normalisées (NDC)
     if (clipV1.w > 0.0001f) clipV1 /= clipV1.w;
     if (clipV2.w > 0.0001f) clipV2 /= clipV2.w;
     if (clipV3.w > 0.0001f) clipV3 /= clipV3.w;
-    
-    // Test de frustum : vérifier si au moins un vertex est dans le frustum [-1, 1] pour x, y, z
     auto isVertexInFrustum = [](const glm::vec4& v) -> bool {
         return v.x >= -1.0f && v.x <= 1.0f &&
                v.y >= -1.0f && v.y <= 1.0f &&
                v.z >= -1.0f && v.z <= 1.0f;
     };
-    
-    // Si au moins un vertex est visible, considérer le triangle comme potentiellement visible
     if (isVertexInFrustum(clipV1) || isVertexInFrustum(clipV2) || isVertexInFrustum(clipV3)) {
         return true;
     }
-    
-    // Test supplémentaire : vérifier si le triangle traverse le frustum
-    // Calculer les limites du triangle en NDC
     float minX = std::min(clipV1.x, std::min(clipV2.x, clipV3.x));
     float maxX = std::max(clipV1.x, std::max(clipV2.x, clipV3.x));
     float minY = std::min(clipV1.y, std::min(clipV2.y, clipV3.y));
-    float maxY = std::max(clipV1.y, std::max(clipV2.y, clipV3.y));
-    
-    // Si le triangle englobe le frustum, il est visible
-    if (minX <= -1.0f && maxX >= 1.0f && minY <= -1.0f && maxY >= 1.0f) {
-        return true;
-    }
-    
-    // Si les limites intersectent le frustum, le triangle peut être visible
-    // Ajout d'une marge pour éviter le culling trop agressif
-    float margin = 0.5f;
+    float maxY = std::max(clipV1.y, clipV2.y);
+    float margin = 1.5f; // Était 0.5f, maintenant 1.5f pour élargir le frustum
     return !(maxX < -1.0f - margin || minX > 1.0f + margin || maxY < -1.0f - margin || minY > 1.0f + margin);
 }
 
