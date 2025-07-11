@@ -3,8 +3,44 @@
 #include <cmath>
 #include <array>
 
+#include "FastNoiseLite.h"
+
 Icosphere::Icosphere(float radius, int subdivisions) : radius(radius) {
     createIcosphere(radius, subdivisions);
+}
+
+void Icosphere::applyProceduralTerrain(float oceanLevel, float mountainHeight) {
+    FastNoiseLite noise;
+    noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    noise.SetFrequency(2.0f); // Ajuste pour plus ou moins de détails
+
+    for (auto& v : vertices) {
+        glm::vec3 posNorm = glm::normalize(v.position);
+        // Utilise la position normalisée comme coordonnée pour le bruit
+        float n = noise.GetNoise(posNorm.x * 10.0f, posNorm.y * 10.0f, posNorm.z * 10.0f);
+        // n est dans [-1,1], on le ramène dans [0,1]
+        n = (n + 1.0f) * 0.5f;
+        v.height = n;
+        float h = 0.0f;
+        if (n < oceanLevel) {
+            h = 0.0f; // Océan
+            v.color = glm::vec3(0.0f, 0.2f, 0.8f); // Bleu
+        } else if (n < oceanLevel + 0.05f) {
+            h = (n - oceanLevel) * mountainHeight * 0.3f; // Côte
+            v.color = glm::vec3(0.9f, 0.85f, 0.6f); // Sable
+        } else if (n < oceanLevel + 0.35f) {
+            h = (n - oceanLevel) * mountainHeight * 0.7f; // Terre
+            v.color = glm::vec3(0.2f, 0.7f, 0.2f); // Vert
+        } else {
+            h = (n - oceanLevel) * mountainHeight; // Montagne
+            v.color = glm::vec3(0.6f, 0.6f, 0.6f); // Gris montagne
+            if (h > mountainHeight * 0.7f) {
+                v.color = glm::vec3(0.95f, 0.95f, 0.95f); // Neige
+            }
+        }
+        v.position = posNorm * (radius + h);
+        v.normal = posNorm; // La normale reste la même
+    }
 }
 
 unsigned int Icosphere::addVertex(const glm::vec3& position) {

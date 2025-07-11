@@ -4,7 +4,11 @@
 #include <glm/glm.hpp>
 
 Scene::Scene()
-    : camera(5.0f, 45.0f, 30.0f), icosphere(1.0f, 3) {}
+    : camera(637.1f, 45.0f, 30.0f), icosphere(637.1f, 5) {
+    // Rayon Terre = 6371 km, donc 637.1 unités (1 unité = 10km)
+    icosphere.applyProceduralTerrain(0.4f, 20.0f); // Relief adapté à l'échelle
+}
+
 
 void Scene::update(float deltaTime) {
     // Camera update logic if needed
@@ -25,7 +29,7 @@ void Scene::render(bool wireframe, bool useRaymarch) {
     // ...existing code...
     glEnable(GL_LIGHTING);
     glEnable(GL_LIGHT0);
-    float light_pos[] = { 5.0f, 5.0f, 5.0f, 1.0f };
+    float light_pos[] = { 1200.0f, 1200.0f, 1200.0f, 1.0f }; // Lumière plus loin
     glLightfv(GL_LIGHT0, GL_POSITION, light_pos);
     float ambient[] = { 0.2f, 0.2f, 0.2f, 1.0f };
     float diffuse[] = { 0.8f, 0.8f, 0.8f, 1.0f };
@@ -40,6 +44,7 @@ void Scene::render(bool wireframe, bool useRaymarch) {
     for (size_t i = 0; i < indices.size(); i += 3) {
         for (int j = 0; j < 3; ++j) {
             const auto& v = vertices[indices[i + j]];
+            glColor3fv(&v.color.x); // Utilise la couleur du sommet
             glNormal3fv(&v.normal.x);
             glVertex3fv(&v.position.x);
         }
@@ -60,4 +65,6 @@ Icosphere& Scene::getIcosphere() {
 
 void Scene::regenerateIcosphere(float radius, int subdivisions) {
     icosphere = Icosphere(radius, subdivisions);
+    icosphere.applyProceduralTerrain(0.4f, 20.0f); // Relief adapté à l'échelle
+    camera = Camera(radius * 1.5f, camera.getYaw(), camera.getPitch()); // Place la caméra plus loin
 }

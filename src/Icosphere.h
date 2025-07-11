@@ -10,11 +10,16 @@ public:
     struct Vertex {
         glm::vec3 position;
         glm::vec3 normal;
+        float height = 0.0f; // Hauteur procédurale
+        glm::vec3 color = glm::vec3(1.0f); // Couleur du sommet
     };
 
-    Icosphere(float radius = 1.0f, int subdivisions = 2);
+    Icosphere(float radius = 1.0f, int subdivisions = 5); // Par défaut, subdivisions élevées
     const std::vector<Vertex>& getVertices() const { return vertices; }
     const std::vector<unsigned int>& getIndices() const { return indices; }
+
+    // Applique un relief procédural (océans et montagnes)
+    void applyProceduralTerrain(float oceanLevel = 0.0f, float mountainHeight = 0.3f);
 
 private:
     std::vector<Vertex> vertices;
