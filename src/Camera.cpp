@@ -7,15 +7,15 @@ Camera::Camera(float radius, float yaw, float pitch)
 }
 
 void Camera::processMouseMovement(float dx, float dy) {
-    yaw += dx * 0.2f;
-    pitch += dy * 0.2f;
+    yaw += dx * 2.0f; // Rotation très rapide
+    pitch += dy * 2.0f;
     pitch = std::clamp(pitch, -89.0f, 89.0f);
     updatePosition();
 }
 
 void Camera::processMouseScroll(float dy) {
-    radius -= dy * 0.5f;
-    radius = std::max(radius, 1.0f);
+    radius -= dy * 1000.0f; // Zoom très rapide
+    radius = std::max(radius, 10.0f);
     updatePosition();
 }
 

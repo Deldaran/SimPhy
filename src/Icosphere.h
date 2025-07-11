@@ -14,7 +14,7 @@ public:
         glm::vec3 color = glm::vec3(1.0f); // Couleur du sommet
     };
 
-    Icosphere(float radius = 1.0f, int subdivisions = 5); // Par défaut, subdivisions élevées
+    Icosphere(float radius = 6371.0f, int subdivisions = 6); // Échelle Terre, subdivisions raisonnables
     const std::vector<Vertex>& getVertices() const { return vertices; }
     const std::vector<unsigned int>& getIndices() const { return indices; }
 

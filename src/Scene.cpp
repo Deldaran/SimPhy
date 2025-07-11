@@ -4,9 +4,9 @@
 #include <glm/glm.hpp>
 
 Scene::Scene()
-    : camera(637.1f, 45.0f, 30.0f), icosphere(637.1f, 5) {
-    // Rayon Terre = 6371 km, donc 637.1 unités (1 unité = 10km)
-    icosphere.applyProceduralTerrain(0.4f, 20.0f); // Relief adapté à l'échelle
+    : camera(63710.0f, 45.0f, 30.0f), icosphere(6371.0f, 6) {
+    // Rayon Terre = 6371 km
+    icosphere.applyProceduralTerrain(0.4f, 200.0f); // Relief adapté à l'échelle Terre
 }
 
 
@@ -29,7 +29,7 @@ void Scene::render(bool wireframe, bool useRaymarch) {
     // ...existing code...
     glEnable(GL_LIGHTING);
     glEnable(GL_LIGHT0);
-    float light_pos[] = { 1200.0f, 1200.0f, 1200.0f, 1.0f }; // Lumière plus loin
+    float light_pos[] = { 149600000.0f, 0.0f, 0.0f, 1.0f }; // Soleil à 149,6 millions de km sur l'axe X
     glLightfv(GL_LIGHT0, GL_POSITION, light_pos);
     float ambient[] = { 0.2f, 0.2f, 0.2f, 1.0f };
     float diffuse[] = { 0.8f, 0.8f, 0.8f, 1.0f };
