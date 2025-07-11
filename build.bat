@@ -17,11 +17,7 @@ if not exist "%VCPKG_ROOT%\vcpkg.exe" (
 :: Create build directory
 if not exist "build" mkdir build
 
-:: Run vcpkg to install dependencies
-echo Installing dependencies with vcpkg...
-"%VCPKG_ROOT%\vcpkg.exe" install --triplet x64-windows
-
-:: Configure with CMake
+:: Configure with CMake (vcpkg manifest mode)
 echo Configuring with CMake...
 cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
 

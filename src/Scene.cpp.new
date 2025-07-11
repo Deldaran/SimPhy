@@ -1,7 +1,0 @@
-// Initialise l'interface utilisateur avec une fenêtre GLFW
-void Scene::initializeUI(GLFWwindow* window) {
-    if (m_ui) {
-        m_ui->initialize(window);
-        m_ui->setShowTimeControls(m_showTimeControls);
-    }
-}
