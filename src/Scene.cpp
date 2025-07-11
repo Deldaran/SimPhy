@@ -26,16 +26,8 @@ void Scene::render(bool wireframe, bool useRaymarch) {
         renderer.render(camPos, camRot, sphereRadius, sphereCenter, lightDir, winWidth, winHeight);
         return;
     }
-    // ...existing code...
-    glEnable(GL_LIGHTING);
-    glEnable(GL_LIGHT0);
-    float light_pos[] = { 149600000.0f, 0.0f, 0.0f, 1.0f }; // Soleil à 149,6 millions de km sur l'axe X
-    glLightfv(GL_LIGHT0, GL_POSITION, light_pos);
-    float ambient[] = { 0.2f, 0.2f, 0.2f, 1.0f };
-    float diffuse[] = { 0.8f, 0.8f, 0.8f, 1.0f };
-    glLightfv(GL_LIGHT0, GL_AMBIENT, ambient);
-    glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse);
-
+    // Rendu mesh sans éclairage, couleur brute du sommet
+    glDisable(GL_LIGHTING);
     glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
 
     const auto& vertices = icosphere.getVertices();
@@ -45,14 +37,12 @@ void Scene::render(bool wireframe, bool useRaymarch) {
         for (int j = 0; j < 3; ++j) {
             const auto& v = vertices[indices[i + j]];
             glColor3fv(&v.color.x); // Utilise la couleur du sommet
-            glNormal3fv(&v.normal.x);
             glVertex3fv(&v.position.x);
         }
     }
     glEnd();
 
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-    glDisable(GL_LIGHTING);
 }
 
 Camera& Scene::getCamera() {

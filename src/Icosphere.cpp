@@ -12,34 +12,44 @@ Icosphere::Icosphere(float radius, int subdivisions) : radius(radius) {
 void Icosphere::applyProceduralTerrain(float oceanLevel, float mountainHeight) {
     FastNoiseLite noise;
     noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
-    noise.SetFrequency(2.0f); // Ajuste pour plus ou moins de détails
+    noise.SetFrequency(0.7f); // Fréquence plus basse pour continents
 
+    // Couleurs principales
+    glm::vec3 oceanColor   = glm::vec3(0.0f, 0.3f, 1.0f); // Bleu vif
+    glm::vec3 sandColor    = glm::vec3(1.0f, 0.95f, 0.5f); // Jaune sable
+    glm::vec3 grassColor   = glm::vec3(0.1f, 0.9f, 0.1f); // Vert vif
+    glm::vec3 rockColor    = glm::vec3(0.7f, 0.7f, 0.7f); // Gris clair
+    glm::vec3 snowColor    = glm::vec3(1.0f, 1.0f, 1.0f); // Blanc pur
+
+    float newOceanLevel = 0.48f; // Moins d'océan, continents plus grands
+    float mountainBoost = mountainHeight * 1.5f; // Montagnes plus hautes
     for (auto& v : vertices) {
         glm::vec3 posNorm = glm::normalize(v.position);
-        // Utilise la position normalisée comme coordonnée pour le bruit
         float n = noise.GetNoise(posNorm.x * 10.0f, posNorm.y * 10.0f, posNorm.z * 10.0f);
-        // n est dans [-1,1], on le ramène dans [0,1]
         n = (n + 1.0f) * 0.5f;
         v.height = n;
         float h = 0.0f;
-        if (n < oceanLevel) {
-            h = 0.0f; // Océan
-            v.color = glm::vec3(0.0f, 0.2f, 0.8f); // Bleu
-        } else if (n < oceanLevel + 0.05f) {
-            h = (n - oceanLevel) * mountainHeight * 0.3f; // Côte
-            v.color = glm::vec3(0.9f, 0.85f, 0.6f); // Sable
-        } else if (n < oceanLevel + 0.35f) {
-            h = (n - oceanLevel) * mountainHeight * 0.7f; // Terre
-            v.color = glm::vec3(0.2f, 0.7f, 0.2f); // Vert
+        glm::vec3 color;
+        // Transitions très nettes
+        if (n < newOceanLevel) {
+            color = oceanColor;
+            h = -mountainHeight * 0.3f * (newOceanLevel - n);
+        } else if (n < newOceanLevel + 0.03f) {
+            color = sandColor;
+            h = (n - newOceanLevel) * mountainHeight * 0.2f;
+        } else if (n < newOceanLevel + 0.13f) {
+            color = grassColor;
+            h = (n - newOceanLevel) * mountainHeight * 0.7f;
+        } else if (n < newOceanLevel + 0.23f) {
+            color = rockColor;
+            h = (n - newOceanLevel) * mountainBoost;
         } else {
-            h = (n - oceanLevel) * mountainHeight; // Montagne
-            v.color = glm::vec3(0.6f, 0.6f, 0.6f); // Gris montagne
-            if (h > mountainHeight * 0.7f) {
-                v.color = glm::vec3(0.95f, 0.95f, 0.95f); // Neige
-            }
+            color = snowColor;
+            h = (n - newOceanLevel) * mountainBoost * 1.2f;
         }
+        v.color = color;
         v.position = posNorm * (radius + h);
-        v.normal = posNorm; // La normale reste la même
+        v.normal = posNorm;
     }
 }
 
