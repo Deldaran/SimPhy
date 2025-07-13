@@ -1,4 +1,4 @@
-#include <GL/glew.h>
+#include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include "Scene.h"
 #include "InputManager.h"
@@ -8,22 +8,25 @@
 
 int main() {
     if (!glfwInit()) return -1;
-    GLFWmonitor* monitor = glfwGetPrimaryMonitor();
-    const GLFWvidmode* mode = glfwGetVideoMode(monitor);
-    GLFWwindow* window = glfwCreateWindow(mode->width, mode->height, "Icosphere Planet", monitor, nullptr);
+    // Fenêtre modulable, dimensions fixes, non fullscreen
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    int winWidth = 1280;
+    int winHeight = 720;
+    GLFWwindow* window = glfwCreateWindow(winWidth, winHeight, "Icosphere Planet", nullptr, nullptr);
     if (!window) { glfwTerminate(); return -1; }
     glfwMakeContextCurrent(window);
-    glewInit();
+    gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 
 
 
     // Set viewport and projection for perfect sphere
-    int winWidth, winHeight;
-    glfwGetFramebufferSize(window, &winWidth, &winHeight);
-    glViewport(0, 0, winWidth, winHeight);
+    // Récupère la taille réelle framebuffer (pour DPI)
+    int fbWidth, fbHeight;
+    glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+    glViewport(0, 0, fbWidth, fbHeight);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    float aspect = (float)winWidth / (float)winHeight;
+    float aspect = (float)fbWidth / (float)fbHeight;
     // Near = 10, Far = 200000 pour l'échelle planète
     glm::mat4 proj = glm::perspective(glm::radians(45.0f), aspect, 10.0f, 200000.0f);
     glLoadMatrixf(&proj[0][0]);
@@ -35,7 +38,6 @@ int main() {
 
     auto lastTime = std::chrono::high_resolution_clock::now();
     bool wireframe = false;
-    bool useRaymarch = false;
     while (!glfwWindowShouldClose(window)) {
         auto now = std::chrono::high_resolution_clock::now();
         float dt = std::chrono::duration<float>(now - lastTime).count();
@@ -61,12 +63,6 @@ int main() {
                 glfwPollEvents();
             }
         }
-        if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
-            useRaymarch = !useRaymarch;
-            while (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
-                glfwPollEvents();
-            }
-        }
 
         glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -77,7 +73,7 @@ int main() {
         // ...
 
         glLoadMatrixf(&scene.getCamera().getViewMatrix()[0][0]);
-        scene.render(wireframe, useRaymarch);
+        scene.render(wireframe);
 
 
 

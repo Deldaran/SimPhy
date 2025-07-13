@@ -94,3 +94,20 @@ Multi-Arch: same
 Description: Make available OpenGL3/ES/ES2 (modern) binding
 Status: install ok installed
 
+Package: glad
+Version: 0.1.36
+Depends: egl-registry, opengl-registry, vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 42d1aa3b357fc1c94914091605a7a28160471b8c59d7fbd1fc3bcdfd92819b4a
+Description: Multi-Language Vulkan/GL/GLES/EGL/GLX/WGL Loader-Generator based on the official specs.
+Default-Features: loader
+Status: install ok installed
+
+Package: glad
+Feature: loader
+Architecture: x64-windows
+Multi-Arch: same
+Description: Generate loader logic.
+Status: install ok installed
+

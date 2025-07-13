@@ -7,12 +7,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Add include directories
 include_directories(include)
 
-# Find required packages
 find_package(glfw3 CONFIG REQUIRED)
 find_package(OpenGL REQUIRED)
-find_package(glew CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
+find_package(glad CONFIG REQUIRED)
 
 # Collect source files
 file(GLOB SOURCES "src/*.cpp")
@@ -25,9 +24,9 @@ target_link_libraries(GalaxyApp
     PRIVATE 
     glfw 
     OpenGL::GL 
-    GLEW::GLEW
     glm::glm
     imgui::imgui
+    glad::glad
 )
 
 # Set output directory

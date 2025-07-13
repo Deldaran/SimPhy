@@ -9,6 +9,45 @@ Icosphere::Icosphere(float radius, int subdivisions) : radius(radius) {
     createIcosphere(radius, subdivisions);
 }
 
+#include <glad/glad.h>
+
+void Icosphere::initGLBuffers() {
+    if (vao != 0) return; // Déjà initialisé
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glGenBuffers(1, &ebo);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
+    // Attributs: position (0), normal (1), couleur (2)
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, position));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, normal));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, color));
+    glBindVertexArray(0);
+}
+
+void Icosphere::bindGLBuffers() const {
+    glBindVertexArray(vao);
+}
+
+void Icosphere::draw() const {
+    glBindVertexArray(vao);
+    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+}
+
+void Icosphere::cleanupGLBuffers() {
+    if (vao) glDeleteVertexArrays(1, &vao);
+    if (vbo) glDeleteBuffers(1, &vbo);
+    if (ebo) glDeleteBuffers(1, &ebo);
+    vao = vbo = ebo = 0;
+}
+
 void Icosphere::applyProceduralTerrain(float oceanLevel, float mountainHeight) {
     FastNoiseLite noise;
     noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
