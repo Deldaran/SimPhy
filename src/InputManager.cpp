@@ -1,5 +1,5 @@
-#include <glad/glad.h>
 #include "InputManager.h"
+
 Scene* InputManager::currentScene = nullptr;
 bool InputManager::rotating = false;
 double InputManager::lastX = 0.0;
@@ -23,7 +23,7 @@ void InputManager::removeCallbacks(GLFWwindow* window) {
 }
 
 void InputManager::mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
-    // Seul le clic gauche contrôle la caméra, le clic du milieu est ignoré
+    // Clic gauche : contrôle caméra libre
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (!cameraControlEnabled) return;
         if (action == GLFW_PRESS) {

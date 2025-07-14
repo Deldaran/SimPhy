@@ -1,3 +1,4 @@
+
 #pragma once
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -12,7 +13,7 @@ public:
     float getRadius() const { return radius; }
     float getYaw() const { return yaw; }
     float getPitch() const { return pitch; }
-private:
+public:
     float radius;
     float yaw;
     float pitch;

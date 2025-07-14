@@ -4,6 +4,9 @@
 #include "InputManager.h"
 #include <chrono>
 
+#include <fstream>
+#include <string>
+
 
 
 int main() {
@@ -16,6 +19,11 @@ int main() {
     if (!window) { glfwTerminate(); return -1; }
     glfwMakeContextCurrent(window);
     gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
+
+    const GLubyte* renderer = glGetString(GL_RENDERER); // nom GPU
+    const GLubyte* version = glGetString(GL_VERSION);   // version OpenGL
+    printf("Renderer: %s\n", renderer);
+    printf("OpenGL version supported: %s\n", version);
 
 
 
@@ -36,8 +44,13 @@ int main() {
     InputManager inputManager(scene);
     inputManager.setupCallbacks(window);
 
+    glm::vec3 camPos(0, 0, 6);
+    glm::vec3 lightDir = glm::normalize(glm::vec3(10, 10, 10));
     auto lastTime = std::chrono::high_resolution_clock::now();
     bool wireframe = false;
+    bool firstPersonMode = false;
+    float fpSpeed = 100000.0f; // Vitesse élevée (1 unité = 1m)
+    glm::vec3 fpDir(0.0f);
     while (!glfwWindowShouldClose(window)) {
         auto now = std::chrono::high_resolution_clock::now();
         float dt = std::chrono::duration<float>(now - lastTime).count();
@@ -53,9 +66,6 @@ int main() {
         glm::mat4 proj = glm::perspective(glm::radians(45.0f), aspect, 10.0f, 200000.0f);
         glLoadMatrixf(&proj[0][0]);
         glMatrixMode(GL_MODELVIEW);
-        // ...
-
-
 
         if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS) {
             wireframe = !wireframe;
@@ -63,19 +73,14 @@ int main() {
                 glfwPollEvents();
             }
         }
-
+        
         glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glEnable(GL_DEPTH_TEST);
 
         scene.update(dt);
-
-        // ...
-
         glLoadMatrixf(&scene.getCamera().getViewMatrix()[0][0]);
         scene.render(wireframe);
-
-
 
         glfwSwapBuffers(window);
     }

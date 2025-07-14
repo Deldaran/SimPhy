@@ -14,7 +14,7 @@ void Camera::processMouseMovement(float dx, float dy) {
 }
 
 void Camera::processMouseScroll(float dy) {
-    radius -= dy * 1000.0f; // Zoom très rapide
+    radius -= dy * 100000.0f; // Zoom ultra rapide
     radius = std::max(radius, 10.0f);
     updatePosition();
 }

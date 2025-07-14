@@ -7,13 +7,16 @@ out vec3 vNormal;
 out vec3 vColor;
 out vec3 vPosition;
 
+
+// Rayon de la planète (1 unité = 1 km)
+const float planetRadius = 6371000.0; // 1 unité = 1m
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProj;
 
 void main() {
-    vNormal = mat3(uModel) * inNormal;
+    vNormal = normalize(mat3(uModel) * inNormal);
     vColor = inColor;
-    vPosition = vec3(uModel * vec4(inPosition, 1.0));
+    vPosition = vec3(uModel * vec4(inPosition * planetRadius, 1.0));
     gl_Position = uProj * uView * uModel * vec4(inPosition, 1.0);
 }

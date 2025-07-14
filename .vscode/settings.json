@@ -4,6 +4,9 @@
         "istream": "cpp",
         "string": "cpp",
         "xstring": "cpp",
-        "charconv": "cpp"
+        "charconv": "cpp",
+        "utility": "cpp",
+        "cmath": "cpp",
+        "map": "cpp"
     }
 }

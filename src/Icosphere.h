@@ -2,11 +2,16 @@
 #pragma once
 #include <vector>
 #include <glm/glm.hpp>
+#include <glad/glad.h>
+#include <GLFW/glfw3.h>
 #include <map>
 #include <utility>
 
+
 class Icosphere {
 public:
+    Icosphere(const glm::vec3& center = glm::vec3(0.0f), float radius = 6371.0f, int subdivisions = 9);
+    glm::vec3 getCenter() const;
     struct Vertex {
         glm::vec3 position;
         glm::vec3 normal;
@@ -14,8 +19,6 @@ public:
         glm::vec3 color = glm::vec3(1.0f); // Couleur du sommet
     };
 
-    // Par défaut subdivisions très élevées pour une vraie précision
-    Icosphere(float radius = 6371.0f, int subdivisions = 9);
     const std::vector<Vertex>& getVertices() const { return vertices; }
     const std::vector<unsigned int>& getIndices() const { return indices; }
 
@@ -29,6 +32,7 @@ public:
     void cleanupGLBuffers();
 
 private:
+    glm::vec3 center; // Position centrale de l'icosphere
     std::vector<Vertex> vertices;
     std::vector<unsigned int> indices;
     float radius;

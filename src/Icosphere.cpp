@@ -3,13 +3,19 @@
 #include <cmath>
 #include <array>
 
+
 #include "FastNoiseLite.h"
 
-Icosphere::Icosphere(float radius, int subdivisions) : radius(radius) {
+Icosphere::Icosphere(const glm::vec3& center, float radius, int subdivisions)
+    : center(center), radius(radius) {
     createIcosphere(radius, subdivisions);
+    // Décale tous les sommets pour que le mesh soit centré sur center
+    for (auto& v : vertices) {
+        v.position += center;
+    }
 }
 
-#include <glad/glad.h>
+
 
 void Icosphere::initGLBuffers() {
     if (vao != 0) return; // Déjà initialisé
@@ -37,7 +43,8 @@ void Icosphere::bindGLBuffers() const {
 
 void Icosphere::draw() const {
     glBindVertexArray(vao);
-    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, 0);
+    glPatchParameteri(GL_PATCH_VERTICES, 3);
+    glDrawElements(GL_PATCHES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
 }
 
@@ -49,42 +56,62 @@ void Icosphere::cleanupGLBuffers() {
 }
 
 void Icosphere::applyProceduralTerrain(float oceanLevel, float mountainHeight) {
-    FastNoiseLite noise;
-    noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
-    noise.SetFrequency(0.7f); // Fréquence plus basse pour continents
+    // Bruit global pour la map eau/terre
+    FastNoiseLite globalNoise;
+    globalNoise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    globalNoise.SetFrequency(0.70f); // Très basse fréquence, continents
 
-    // Couleurs principales
-    glm::vec3 oceanColor   = glm::vec3(0.0f, 0.3f, 1.0f); // Bleu vif
-    glm::vec3 sandColor    = glm::vec3(1.0f, 0.95f, 0.5f); // Jaune sable
-    glm::vec3 grassColor   = glm::vec3(0.1f, 0.9f, 0.1f); // Vert vif
-    glm::vec3 rockColor    = glm::vec3(0.7f, 0.7f, 0.7f); // Gris clair
-    glm::vec3 snowColor    = glm::vec3(1.0f, 1.0f, 1.0f); // Blanc pur
+    // Bruit terrain pour reliefs (montagnes, plaines, forêts)
+    FastNoiseLite terrainNoise;
+    terrainNoise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    terrainNoise.SetFrequency(2.0f); // Moyenne fréquence
 
-    float newOceanLevel = 0.48f; // Moins d'océan, continents plus grands
-    float mountainBoost = mountainHeight * 1.5f; // Montagnes plus hautes
+    // Bruit fin pour détails (roches, forêts, etc.)
+    FastNoiseLite detailNoise;
+    detailNoise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    detailNoise.SetFrequency(8.0f); // Haute fréquence
+
+    // Palettes
+    std::vector<glm::vec3> waterPalette = {
+        {0.0f, 0.2f, 0.6f}, {0.0f, 0.3f, 0.8f}, {0.0f, 0.4f, 1.0f}, {0.0f, 0.5f, 1.0f}, {0.1f, 0.7f, 1.0f}
+    };
+    std::vector<glm::vec3> landPalette = {
+        {0.5f, 0.8f, 0.7f}, {1.0f, 0.95f, 0.5f}, {0.8f, 0.9f, 0.4f}, {0.6f, 0.8f, 0.3f}, {0.3f, 0.7f, 0.2f},
+        {0.1f, 0.9f, 0.1f}, {0.0f, 0.5f, 0.0f}, {0.5f, 0.3f, 0.1f}, {0.7f, 0.7f, 0.7f}, {0.4f, 0.4f, 0.5f},
+        {0.7f, 0.8f, 0.9f}, {0.9f, 0.95f, 1.0f}, {1.0f, 1.0f, 1.0f}, {0.8f, 0.8f, 0.8f}, {0.6f, 0.7f, 0.9f}
+    };
+
+    float oceanThreshold = 0.48f; // Seuil pour l'eau
+    float mountainAmplitude = mountainHeight; // Amplitude max montagne (ex: 2000m)
+    float detailAmplitude = mountainHeight * 0.2f; // Détail fin
+
     for (auto& v : vertices) {
         glm::vec3 posNorm = glm::normalize(v.position);
-        float n = noise.GetNoise(posNorm.x * 10.0f, posNorm.y * 10.0f, posNorm.z * 10.0f);
-        n = (n + 1.0f) * 0.5f;
-        v.height = n;
+        float global = globalNoise.GetNoise(posNorm.x * 10.0f, posNorm.y * 10.0f, posNorm.z * 10.0f);
+        global = (global + 1.0f) * 0.5f;
+        float terrain = terrainNoise.GetNoise(posNorm.x * 100.0f, posNorm.y * 100.0f, posNorm.z * 100.0f);
+        terrain = (terrain + 1.0f) * 0.5f;
+        float detail = detailNoise.GetNoise(posNorm.x * 500.0f, posNorm.y * 500.0f, posNorm.z * 500.0f);
+        detail = (detail + 1.0f) * 0.5f;
+
         float h = 0.0f;
         glm::vec3 color;
-        // Transitions très nettes
-        if (n < newOceanLevel) {
-            color = oceanColor;
-            h = -mountainHeight * 0.3f * (newOceanLevel - n);
-        } else if (n < newOceanLevel + 0.03f) {
-            color = sandColor;
-            h = (n - newOceanLevel) * mountainHeight * 0.2f;
-        } else if (n < newOceanLevel + 0.13f) {
-            color = grassColor;
-            h = (n - newOceanLevel) * mountainHeight * 0.7f;
-        } else if (n < newOceanLevel + 0.23f) {
-            color = rockColor;
-            h = (n - newOceanLevel) * mountainBoost;
+        if (global < oceanThreshold) {
+            // Eau
+            float idxf = global * (waterPalette.size() - 1);
+            int idx = static_cast<int>(idxf);
+            float t = idxf - idx;
+            color = glm::mix(waterPalette[idx], waterPalette[std::min(idx+1, (int)waterPalette.size()-1)], t);
+            h = -100.0f * (oceanThreshold - global); // Profondeur max 100m
         } else {
-            color = snowColor;
-            h = (n - newOceanLevel) * mountainBoost * 1.2f;
+            // Terre
+            float idxf = terrain * (landPalette.size() - 1);
+            int idx = static_cast<int>(idxf);
+            float t = idxf - idx;
+            color = glm::mix(landPalette[idx], landPalette[std::min(idx+1, (int)landPalette.size()-1)], t);
+            float mountain = pow(terrain, 3.0f) * mountainAmplitude; // Montagnes max
+            float detailRelief = (detail - 0.5f) * detailAmplitude; // Détail fin
+            h = mountain + detailRelief;
         }
         v.color = color;
         v.position = posNorm * (radius + h);
@@ -155,4 +182,8 @@ void Icosphere::createIcosphere(float radius, int subdivisions) {
         indices.push_back(tri[1]);
         indices.push_back(tri[2]);
     }
+}
+
+glm::vec3 Icosphere::getCenter() const {
+    return center;
 }
