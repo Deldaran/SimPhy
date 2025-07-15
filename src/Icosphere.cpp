@@ -12,6 +12,11 @@ Icosphere::Icosphere(const glm::vec3& center, float radius, int subdivisions)
     // Décale tous les sommets pour que le mesh soit centré sur center
     for (auto& v : vertices) {
         v.position += center;
+        // UV sphériques
+        glm::vec3 p = glm::normalize(v.position - center);
+        float u = 0.5f + atan2(p.z, p.x) / (2.0f * 3.14159265358979323846f);
+        float v_uv = 0.5f - asin(p.y) / 3.14159265358979323846f;
+        v.uv = glm::vec2(u, v_uv);
     }
 }
 
@@ -27,13 +32,15 @@ void Icosphere::initGLBuffers() {
     glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
-    // Attributs: position (0), normal (1), couleur (2)
+    // Attributs: position (0), normal (1), uv (2), couleur (3)
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, position));
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, normal));
     glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, color));
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, uv));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, color));
     glBindVertexArray(0);
 }
 

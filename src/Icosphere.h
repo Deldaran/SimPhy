@@ -15,6 +15,7 @@ public:
     struct Vertex {
         glm::vec3 position;
         glm::vec3 normal;
+        glm::vec2 uv; // Coordonnées UV pour shaders
         float height = 0.0f; // Hauteur procédurale
         glm::vec3 color = glm::vec3(1.0f); // Couleur du sommet
     };

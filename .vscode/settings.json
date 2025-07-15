@@ -7,6 +7,7 @@
         "charconv": "cpp",
         "utility": "cpp",
         "cmath": "cpp",
-        "map": "cpp"
+        "map": "cpp",
+        "algorithm": "cpp"
     }
 }
