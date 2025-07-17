@@ -15,6 +15,8 @@ T clamp(T val, T minVal, T maxVal) {
 #include <sstream>
 #include <string>
 #include <glm/gtc/type_ptr.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/euler_angles.hpp>
 
 
 
@@ -62,6 +64,18 @@ int createProgram(const std::string& vertPath, const std::string& tescPath, cons
     glDeleteShader(frag);
     return prog;
 }
+
+// Activation GPU dédié (NVIDIA/AMD)
+extern "C" {
+    __declspec(dllexport) unsigned long NvOptimusEnablement = 0x00000001;
+    __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+}
+
+struct AvionCamera {
+    glm::vec3 position = glm::vec3(0.0f, 10000.0f, 0.0f);
+    float pitch = 0.0f, yaw = 0.0f, roll = 0.0f;
+    float speed = 100.0f;
+};
 
 int main() {
     if (!glfwInit()) return -1;
@@ -120,6 +134,8 @@ int main() {
     const float planetRadius = 6371.0f;
     Camera camera(planetRadius * 2.0f, 0.0f, 0.0f); // Distance initiale = 2x rayon planète
     bool orbitMode = true; // true = orbite, false = avion
+    bool avionMode = false;
+    AvionCamera avionCam;
     glm::vec3 cameraFront(0.0f, 0.0f, -1.0f);
     glm::vec3 cameraUp(0.0f, 1.0f, 0.0f);
     float baseSpeed = 0.2f; // vitesse relative
@@ -140,10 +156,21 @@ int main() {
             wireframe = !wireframe;
             while (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS) glfwPollEvents();
         }
-        // Mode switch
+        // Mode switch (TAB = orbite, V = avion)
         if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
             orbitMode = !orbitMode;
             while (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) glfwPollEvents();
+        }
+        if (glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS) {
+            avionMode = !avionMode;
+            while (glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS) glfwPollEvents();
+            if (avionMode) {
+                // Init position avion à la position caméra
+                avionCam.position = camera.position;
+                avionCam.pitch = camera.pitch;
+                avionCam.yaw = camera.yaw;
+                avionCam.roll = 0.0f;
+            }
         }
         // Mouse movement (rotation seulement si clic gauche)
         double xpos, ypos;
@@ -156,7 +183,30 @@ int main() {
             dy = float(lastY - ypos);
         }
         lastX = xpos; lastY = ypos;
-        if (orbitMode) {
+        if (avionMode) {
+            // Contrôle avion (souris = pitch/yaw, Q/E = roll)
+            if (leftPressed) {
+                avionCam.yaw += dx * 0.2f;
+                avionCam.pitch += dy * 0.2f;
+                avionCam.pitch = clamp(avionCam.pitch, -89.0f, 89.0f);
+            }
+            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) avionCam.roll -= 60.0f * dt;
+            if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) avionCam.roll += 60.0f * dt;
+            // Calcul direction
+            glm::mat4 rot = glm::eulerAngleYXZ(glm::radians(avionCam.yaw), glm::radians(avionCam.pitch), glm::radians(avionCam.roll));
+            glm::vec3 forward = glm::vec3(rot * glm::vec4(0,0,-1,0));
+            glm::vec3 right = glm::vec3(rot * glm::vec4(1,0,0,0));
+            glm::vec3 up = glm::vec3(rot * glm::vec4(0,1,0,0));
+            // ZQSD pour avancer/reculer/gauche/droite
+            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) avionCam.position += forward * avionCam.speed * dt;
+            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) avionCam.position -= forward * avionCam.speed * dt;
+            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) avionCam.position -= right * avionCam.speed * dt;
+            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) avionCam.position += right * avionCam.speed * dt;
+            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) avionCam.position += up * avionCam.speed * dt;
+            if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) avionCam.position -= up * avionCam.speed * dt;
+            cameraFront = forward;
+            cameraUp = up;
+        } else if (orbitMode) {
             if (leftPressed) camera.processMouseMovement(dx, dy);
         } else {
             if (leftPressed) {
@@ -185,7 +235,7 @@ int main() {
         if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) camera.processMouseScroll(-0.01f);
         if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) camera.processMouseScroll(0.01f);
         // Déplacement clavier
-        if (!orbitMode) {
+        if (!orbitMode && !avionMode) {
             glm::vec3 right = glm::normalize(glm::cross(cameraFront, cameraUp));
             if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camera.position += cameraFront * cameraSpeed * dt;
             if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) camera.position -= cameraFront * cameraSpeed * dt;
@@ -200,10 +250,16 @@ int main() {
         float aspect = (float)winWidth / (float)winHeight;
         glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspect, 10.0f, 200000000.0f);
         glm::mat4 view;
-        if (orbitMode) {
+        if (avionMode) {
+            view = glm::lookAt(avionCam.position, avionCam.position + cameraFront, cameraUp);
+            // Uniform pour le shader
+            glUniform3f(glGetUniformLocation(planetProgram, "cameraPos"), avionCam.position.x, avionCam.position.y, avionCam.position.z);
+        } else if (orbitMode) {
             view = camera.getViewMatrix();
+            glUniform3f(glGetUniformLocation(planetProgram, "cameraPos"), camera.position.x, camera.position.y, camera.position.z);
         } else {
             view = glm::lookAt(camera.position, camera.position + cameraFront, cameraUp);
+            glUniform3f(glGetUniformLocation(planetProgram, "cameraPos"), camera.position.x, camera.position.y, camera.position.z);
         }
 
         glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
@@ -219,7 +275,7 @@ int main() {
         glUniform1f(glGetUniformLocation(planetProgram, "planetRadius"), planetRadius);
         glUniform3f(glGetUniformLocation(planetProgram, "planetCenter"), 0.0f, 0.0f, 0.0f);
         // Ajout de la position caméra pour LOD dynamique
-        glUniform3f(glGetUniformLocation(planetProgram, "cameraPos"), camera.position.x, camera.position.y, camera.position.z);
+        // cameraPos uniform déplacé dans le bloc view
 
         glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
         icosphere.draw();

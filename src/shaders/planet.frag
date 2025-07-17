@@ -84,11 +84,18 @@ float terrainMask(vec3 p) {
     return smoothstep(0.3, 0.7, fbm(p * 0.05));
 }
 
+// --- Masque de continents ---
+float continentMask(vec3 p) {
+    // Bruit très lent pour définir les continents (valeurs proches de 0 = océan, proches de 1 = terre)
+    return smoothstep(0.35, 0.55, fbm(p * 0.01));
+}
+
 float triplanar_terrain(vec3 p) {
-    float base = fbm(p * 0.2); // Grandes plaines
-    float mask = terrainMask(p); // Masque montagne
-    float mountain = fbm(p * 1.0); // Détail montagne
-    return base + mask * mountain * 2.0; // Amplifie les montagnes là où le masque est fort
+    float continent = continentMask(p); // 0 = océan, 1 = terre
+    float base = fbm(p * 0.2) * continent; // Grandes plaines sur la terre
+    float mask = terrainMask(p) * continent; // Masque montagne sur la terre
+    float mountain = fbm(p * 1.0) * continent; // Détail montagne sur la terre
+    return mix(-0.2, base + mask * mountain * 2.0, continent); // Océan = -0.2, Terre = relief
 }
 out vec4 FragColor;
 
@@ -121,6 +128,30 @@ vec3 estimateNormal(vec3 p) {
     ));
 }
 
+// --- Biome selection ---
+int getBiome(vec3 p) {
+    float continent = continentMask(p);
+    float altitude = triplanar_terrain(p); // hauteur relative
+    float lat = abs(normalize(p - planetCenter).y); // latitude (0 = équateur, 1 = pôle)
+    float moisture = fbm(p * 0.03); // humidité
+
+    if (continent < 0.5) return 0; // océan
+    if (altitude < 0.02) return 1; // plage
+    if (moisture > 0.5 && altitude < 0.6 && lat < 0.7) return 2; // forêt
+    if (altitude < 0.7) return 3; // plaine
+    if (altitude < 0.85) return 4; // montagne
+    return 5; // sommet neigeux
+}
+
+vec3 biomeColor(int biome) {
+    if (biome == 0) return vec3(0.0, 0.2, 0.7); // océan
+    if (biome == 1) return vec3(0.9, 0.8, 0.5); // plage
+    if (biome == 2) return vec3(0.1, 0.6, 0.2); // forêt
+    if (biome == 3) return vec3(0.5, 0.7, 0.3); // plaine
+    if (biome == 4) return vec3(0.5, 0.5, 0.5); // montagne
+    return vec3(1.0, 1.0, 1.0); // neige
+}
+
 void main() {
     // Position et normale interpolées
     vec3 pos = te_out.pos;
@@ -132,10 +163,13 @@ void main() {
     vec3 toCenter = normalize(pos - planetCenter);
     if (dot(toCamera, toCenter) < 0.0) discard;
 
+    // Biome et couleur
+    int biome = getBiome(pos);
+    vec3 baseColor = biomeColor(biome);
+
     // Lumière
     vec3 lightDir = normalize(vec3(10, 10, 10));
     float diff = max(dot(normal, lightDir), 0.0);
     float spec = pow(max(dot(reflect(-lightDir, normal), normalize(pos)), 0.0), 32.0);
-    vec3 baseColor = vec3(0.2, 0.5, 0.8);
     FragColor = vec4(baseColor * diff + vec3(0.5) * spec, 1.0);
 }
