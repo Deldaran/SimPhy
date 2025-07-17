@@ -99,9 +99,13 @@ float triplanar_terrain(vec3 p) {
 }
 out vec4 FragColor;
 
+
 uniform float planetRadius;
 uniform vec3 planetCenter;
 uniform vec3 cameraPos;
+uniform vec3 sunDirection; // direction du soleil
+uniform mat4 lightSpaceMatrix; // matrice de projection du soleil
+uniform sampler2DShadow shadowMap; // shadowmap directionnelle
 
 in VS_OUT {
     vec3 pos;
@@ -147,27 +151,74 @@ vec3 biomeColor(int biome) {
     return vec3(1.0, 1.0, 1.0); // neige
 }
 
+// Ray marching parameters
+#define MAX_STEPS 128
+#define MIN_DIST 0.01
+#define MAX_DIST 10000.0
+
+// Ray marching to find intersection with planet SDF
+bool rayMarch(vec3 ro, vec3 rd, out vec3 hitPos, out float hitDist) {
+    float t = 0.0;
+    for (int i = 0; i < MAX_STEPS; ++i) {
+        vec3 p = ro + rd * t;
+        float d = planetSDF(p);
+        if (abs(d) < MIN_DIST) {
+            hitPos = p;
+            hitDist = t;
+            return true;
+        }
+        t += d;
+        if (t > MAX_DIST) break;
+    }
+    return false;
+}
+
 void main() {
-    // Position et normale interpolées
+    // Utilise la position et la normale du mesh CPU
     vec3 pos = te_out.pos;
-    // Utilise la normale du mesh (CPU)
     vec3 normal = normalize(te_out.normal);
 
-    // Culling planétaire : masque la face non vue
-    vec3 toCamera = normalize(cameraPos - pos);
-    vec3 toCenter = normalize(pos - planetCenter);
-    if (dot(toCamera, toCenter) < 0.0) discard;
-
-    // Utilise l'altitude CPU encodée dans te_out.uv.y
+    // Altitude et biomes
     float altitude = te_out.uv.y;
     float lat = abs(normalize(pos - planetCenter).y);
     float moisture = fbm(pos * 0.03);
     int biome = getBiome(altitude, lat, moisture);
     vec3 baseColor = biomeColor(biome);
 
-    // Lumière
-    vec3 lightDir = normalize(vec3(10, 10, 10));
+    // Lumière directionnelle (Soleil au loin)
+    vec3 lightDir = normalize(sunDirection);
     float diff = max(dot(normal, lightDir), 0.0);
-    float spec = pow(max(dot(reflect(-lightDir, normal), normalize(pos)), 0.0), 32.0);
-    FragColor = vec4(baseColor * diff + vec3(0.5) * spec, 1.0);
+
+    // Ombre dynamique par ray marching depuis le soleil
+    float shadow = 1.0;
+    vec3 sunOrigin = planetCenter + sunDirection * (planetRadius * 10.0); // soleil très loin
+    vec3 rayDir = normalize(pos - sunOrigin);
+    float t = 0.0;
+    bool inShadow = false;
+    for (int i = 0; i < 64; ++i) {
+        vec3 p = sunOrigin + rayDir * t;
+        float d = planetSDF(p);
+        if (d < 0.0) { inShadow = true; break; }
+        t += max(d, 0.5);
+        if (t > length(pos - sunOrigin)) break;
+    }
+    if (inShadow) shadow = 0.0;
+
+    // Blinn-Phong spéculaire
+    vec3 viewDir = normalize(cameraPos - pos);
+    vec3 halfDir = normalize(lightDir + viewDir);
+    float spec = pow(max(dot(normal, halfDir), 0.0), 64.0);
+
+    // Fresnel
+    float fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), 5.0);
+
+    // Ambiant simple (constante, à remplacer par cubemap ou AO)
+    vec3 ambient = vec3(0.15);
+
+    // Couleur finale avec ombre
+    vec3 color = baseColor * diff * shadow + vec3(1.0) * spec * fresnel + ambient;
+
+    // ...effet d'éblouissement retiré, seul le ray marching pour l'ombre reste...
+
+    FragColor = vec4(color, 1.0);
 }
