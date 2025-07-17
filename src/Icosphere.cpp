@@ -9,14 +9,16 @@
 Icosphere::Icosphere(const glm::vec3& center, float radius, int subdivisions)
     : center(center), radius(radius) {
     createIcosphere(radius, subdivisions);
+    // Génère les reliefs procéduraux automatiquement
+    applyProceduralTerrain(0.48f, radius * 0.2f);
     // Décale tous les sommets pour que le mesh soit centré sur center
     for (auto& v : vertices) {
         v.position += center;
-        // UV sphériques
+        // UV sphérique (ne modifie que x, y = altitude déjà encodée)
         glm::vec3 p = glm::normalize(v.position - center);
         float u = 0.5f + atan2(p.z, p.x) / (2.0f * 3.14159265358979323846f);
-        float v_uv = 0.5f - asin(p.y) / 3.14159265358979323846f;
-        v.uv = glm::vec2(u, v_uv);
+        v.uv.x = u;
+        // v.uv.y = altitude déjà encodée dans applyProceduralTerrain
     }
 }
 
@@ -103,6 +105,7 @@ void Icosphere::applyProceduralTerrain(float oceanLevel, float mountainHeight) {
 
         float h = 0.0f;
         glm::vec3 color;
+        float altitude = 0.0f;
         if (global < oceanThreshold) {
             // Eau
             float idxf = global * (waterPalette.size() - 1);
@@ -110,6 +113,7 @@ void Icosphere::applyProceduralTerrain(float oceanLevel, float mountainHeight) {
             float t = idxf - idx;
             color = glm::mix(waterPalette[idx], waterPalette[std::min(idx+1, (int)waterPalette.size()-1)], t);
             h = -100.0f * (oceanThreshold - global); // Profondeur max 100m
+            altitude = -100.0f * (oceanThreshold - global);
         } else {
             // Terre
             float idxf = terrain * (landPalette.size() - 1);
@@ -119,10 +123,13 @@ void Icosphere::applyProceduralTerrain(float oceanLevel, float mountainHeight) {
             float mountain = pow(terrain, 3.0f) * mountainAmplitude; // Montagnes max
             float detailRelief = (detail - 0.5f) * detailAmplitude; // Détail fin
             h = mountain + detailRelief;
+            altitude = h;
         }
         v.color = color;
         v.position = posNorm * (radius + h);
         v.normal = posNorm;
+        // Encode l'altitude dans le canal UV.y (ou un canal custom si Vertex le permet)
+        v.uv.y = altitude / mountainHeight; // Normalisé [-1,1] ou [0,1] selon usage
     }
 }
 

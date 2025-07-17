@@ -129,13 +129,8 @@ vec3 estimateNormal(vec3 p) {
 }
 
 // --- Biome selection ---
-int getBiome(vec3 p) {
-    float continent = continentMask(p);
-    float altitude = triplanar_terrain(p); // hauteur relative
-    float lat = abs(normalize(p - planetCenter).y); // latitude (0 = équateur, 1 = pôle)
-    float moisture = fbm(p * 0.03); // humidité
-
-    if (continent < 0.5) return 0; // océan
+int getBiome(float altitude, float lat, float moisture) {
+    if (altitude < -0.01) return 0; // océan
     if (altitude < 0.02) return 1; // plage
     if (moisture > 0.5 && altitude < 0.6 && lat < 0.7) return 2; // forêt
     if (altitude < 0.7) return 3; // plaine
@@ -155,16 +150,19 @@ vec3 biomeColor(int biome) {
 void main() {
     // Position et normale interpolées
     vec3 pos = te_out.pos;
-    // Normale via gradient SDF
-    vec3 normal = estimateNormal(pos);
+    // Utilise la normale du mesh (CPU)
+    vec3 normal = normalize(te_out.normal);
 
     // Culling planétaire : masque la face non vue
     vec3 toCamera = normalize(cameraPos - pos);
     vec3 toCenter = normalize(pos - planetCenter);
     if (dot(toCamera, toCenter) < 0.0) discard;
 
-    // Biome et couleur
-    int biome = getBiome(pos);
+    // Utilise l'altitude CPU encodée dans te_out.uv.y
+    float altitude = te_out.uv.y;
+    float lat = abs(normalize(pos - planetCenter).y);
+    float moisture = fbm(pos * 0.03);
+    int biome = getBiome(altitude, lat, moisture);
     vec3 baseColor = biomeColor(biome);
 
     // Lumière
