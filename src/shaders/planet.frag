@@ -94,6 +94,7 @@ out vec4 FragColor;
 
 uniform float planetRadius;
 uniform vec3 planetCenter;
+uniform vec3 cameraPos;
 
 in VS_OUT {
     vec3 pos;
@@ -125,6 +126,11 @@ void main() {
     vec3 pos = te_out.pos;
     // Normale via gradient SDF
     vec3 normal = estimateNormal(pos);
+
+    // Culling planétaire : masque la face non vue
+    vec3 toCamera = normalize(cameraPos - pos);
+    vec3 toCenter = normalize(pos - planetCenter);
+    if (dot(toCamera, toCenter) < 0.0) discard;
 
     // Lumière
     vec3 lightDir = normalize(vec3(10, 10, 10));

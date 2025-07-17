@@ -218,6 +218,8 @@ int main() {
         // Ajout des uniforms pour le shader procédural
         glUniform1f(glGetUniformLocation(planetProgram, "planetRadius"), planetRadius);
         glUniform3f(glGetUniformLocation(planetProgram, "planetCenter"), 0.0f, 0.0f, 0.0f);
+        // Ajout de la position caméra pour LOD dynamique
+        glUniform3f(glGetUniformLocation(planetProgram, "cameraPos"), camera.position.x, camera.position.y, camera.position.z);
 
         glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
         icosphere.draw();
