@@ -8,6 +8,7 @@
         "utility": "cpp",
         "cmath": "cpp",
         "map": "cpp",
-        "algorithm": "cpp"
+        "algorithm": "cpp",
+        "cstdlib": "cpp"
     }
 }

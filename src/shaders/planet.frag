@@ -104,8 +104,7 @@ uniform float planetRadius;
 uniform vec3 planetCenter;
 uniform vec3 cameraPos;
 uniform vec3 sunDirection; // direction du soleil
-uniform mat4 lightSpaceMatrix; // matrice de projection du soleil
-uniform sampler2DShadow shadowMap; // shadowmap directionnelle
+
 
 in VS_OUT {
     vec3 pos;
@@ -118,7 +117,8 @@ in VS_OUT {
 
 // --- SDF pour la planète ---
 float planetSDF(vec3 p) {
-    float h = triplanar_terrain(p) * 20.0; // hauteur max 20m, relief varié
+    // Utilise l'altitude réelle du mesh CPU (interpolée par le rasterizer)
+    float h = te_out.uv.y * 20.0; // 20.0 = même échelle que le mesh CPU
     return length(p - planetCenter) - (planetRadius + h);
 }
 
@@ -189,20 +189,23 @@ void main() {
     vec3 lightDir = normalize(sunDirection);
     float diff = max(dot(normal, lightDir), 0.0);
 
-    // Ombre dynamique par ray marching depuis le soleil
+    // Ombre douce (soft shadow) par ray marching
     float shadow = 1.0;
-    vec3 sunOrigin = planetCenter + sunDirection * (planetRadius * 10.0); // soleil très loin
+    vec3 sunOrigin = planetCenter + sunDirection * (planetRadius * 10.0);
     vec3 rayDir = normalize(pos - sunOrigin);
     float t = 0.0;
-    bool inShadow = false;
+    float minRatio = 1.0;
+    float k = 32.0; // facteur de douceur (plus grand = ombre plus dure)
+    float distToSurf = length(pos - sunOrigin);
     for (int i = 0; i < 64; ++i) {
         vec3 p = sunOrigin + rayDir * t;
         float d = planetSDF(p);
-        if (d < 0.0) { inShadow = true; break; }
+        minRatio = min(minRatio, k * d / t);
+        if (d < 0.001) { minRatio = 0.0; break; }
         t += max(d, 0.5);
-        if (t > length(pos - sunOrigin)) break;
+        if (t > distToSurf) break;
     }
-    if (inShadow) shadow = 0.0;
+    shadow = clamp(minRatio, 0.0, 1.0);
 
     // Blinn-Phong spéculaire
     vec3 viewDir = normalize(cameraPos - pos);

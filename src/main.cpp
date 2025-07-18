@@ -1,5 +1,6 @@
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
-// ...existing code...
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include "Icosphere.h"
@@ -20,7 +21,6 @@ template<typename T>
 T clamp(T val, T minVal, T maxVal) {
     return std::max(minVal, std::min(val, maxVal));
 }
-
 
 int compileShader(const std::string& src, GLenum type) {
     int shader = glCreateShader(type);
@@ -120,6 +120,22 @@ icosphere.initGLBuffers();
 glm::vec3 baseSunDir = glm::normalize(glm::vec3(1.0f, 0.0f, 0.0f));
 sunDir = glm::vec3(glm::rotate(glm::mat4(1.0f), obliquity, glm::vec3(1,0,0)) * glm::vec4(baseSunDir, 0.0f));
 
+
+// Chargement de la heightmap générée
+int texW, texH, texC;
+unsigned char* heightData = stbi_load("heightmap.png", &texW, &texH, &texC, 1);
+GLuint heightmapTex = 0;
+if (heightData) {
+    glGenTextures(1, &heightmapTex);
+    glBindTexture(GL_TEXTURE_2D, heightmapTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, texW, texH, 0, GL_RED, GL_UNSIGNED_BYTE, heightData);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    stbi_image_free(heightData);
+}
+
 // Création du soleil (utilise la même classe que la planète, mais sans relief)
 glm::vec3 sunPos = glm::vec3(0.0f) + sunDir * planetRadius * 10.0f;
 Icosphere sunIcosphere(sunPos, planetRadius * 2.0f, 5, false); // sphère lisse, même subdivision
@@ -157,15 +173,6 @@ sunIcosphere.initGLBuffers();
     glDeleteShader(sunVert);
     glDeleteShader(sunFrag);
 
-    // Shaders shadowmap
-    int shadowVert = compileShader(readFile("shadow.vert"), GL_VERTEX_SHADER);
-    int shadowFrag = compileShader(readFile("shadow.frag"), GL_FRAGMENT_SHADER);
-    int shadowProgram = glCreateProgram();
-    glAttachShader(shadowProgram, shadowVert);
-    glAttachShader(shadowProgram, shadowFrag);
-    glLinkProgram(shadowProgram);
-    glDeleteShader(shadowVert);
-    glDeleteShader(shadowFrag);
 
     const float planetRadius = 6371.0f;
     // Inclinaison initiale de la caméra pour orbiter sur l'équateur incliné
@@ -184,24 +191,6 @@ sunIcosphere.initGLBuffers();
     glm::mat4 model = glm::mat4(1.0f);
     auto lastTime = std::chrono::high_resolution_clock::now();
     bool wireframe = false;
-    // --- Shadowmap setup ---
-    GLuint shadowFBO, shadowMapTex;
-    const GLuint SHADOW_WIDTH = 2048, SHADOW_HEIGHT = 2048;
-    glGenFramebuffers(1, &shadowFBO);
-    glGenTextures(1, &shadowMapTex);
-    glBindTexture(GL_TEXTURE_2D, shadowMapTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    float borderColor[] = {1.0, 1.0, 1.0, 1.0};
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
-    glBindFramebuffer(GL_FRAMEBUFFER, shadowFBO);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadowMapTex, 0);
-    glDrawBuffer(GL_NONE);
-    glReadBuffer(GL_NONE);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 // Direction du soleil et matrices (déjà inclinée)
 glm::mat4 lightView = glm::lookAt(-sunDir * planetRadius * 10.0f, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
@@ -307,16 +296,6 @@ glm::mat4 lightSpaceMatrix = lightProj * lightView;
         }
         int winWidth, winHeight;
         glfwGetFramebufferSize(window, &winWidth, &winHeight);
-        // --- 1. Render shadowmap ---
-        glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
-        glBindFramebuffer(GL_FRAMEBUFFER, shadowFBO);
-        glClear(GL_DEPTH_BUFFER_BIT);
-        // Utilise un shader simple qui écrit la profondeur depuis le point de vue du soleil
-        glUseProgram(shadowProgram); // shadowProgram = shader qui écrit la profondeur
-        glUniformMatrix4fv(glGetUniformLocation(shadowProgram, "lightSpaceMatrix"), 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
-        glUniformMatrix4fv(glGetUniformLocation(shadowProgram, "model"), 1, GL_FALSE, glm::value_ptr(model));
-        icosphere.draw();
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
         // --- 2. Render scene ---
         glViewport(0, 0, winWidth, winHeight);
@@ -358,13 +337,12 @@ glm::mat4 lightSpaceMatrix = lightProj * lightView;
         glUniformMatrix4fv(glGetUniformLocation(planetProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(planetProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
         glUniform1f(glGetUniformLocation(planetProgram, "planetRadius"), planetRadius);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, heightmapTex);
+        glUniform1i(glGetUniformLocation(planetProgram, "heightmapTex"), 1);
         glUniform3f(glGetUniformLocation(planetProgram, "planetCenter"), 0.0f, 0.0f, 0.0f);
         glUniform3f(glGetUniformLocation(planetProgram, "sunDirection"), sunDir.x, sunDir.y, sunDir.z);
-        glUniformMatrix4fv(glGetUniformLocation(planetProgram, "lightSpaceMatrix"), 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
         glUniform3f(glGetUniformLocation(planetProgram, "cameraPos"), camPos.x, camPos.y, camPos.z);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, shadowMapTex);
-        glUniform1i(glGetUniformLocation(planetProgram, "shadowMap"), 0);
         glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
         icosphere.draw();
 

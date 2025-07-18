@@ -1,3 +1,11 @@
+// Includes standards
+#include <vector>
+#include <string>
+#include <cmath>
+#include <algorithm>
+#include "stb_image_write.h"
+
+
 #include "Icosphere.h"
 #include <map>
 #include <cmath>
@@ -5,6 +13,28 @@
 
 
 #include "FastNoiseLite.h"
+
+// Génère une texture d'altitude sphérique (longitude/latitude) et la sauvegarde en PNG
+static void saveHeightmapTexture(const std::vector<Icosphere::Vertex>& vertices, int texSize, const std::string& filename) {
+    std::vector<unsigned char> image(texSize * texSize);
+    for (int y = 0; y < texSize; ++y) {
+        float v = float(y) / float(texSize - 1);
+        for (int x = 0; x < texSize; ++x) {
+            float u = float(x) / float(texSize - 1);
+            // Cherche le sommet le plus proche (brut, mais suffisant pour une première version)
+            float minDist = 1e9;
+            float bestAlt = 0.0f;
+            for (const auto& vert : vertices) {
+                float du = abs(vert.uv.x - u);
+                float dv = abs(vert.uv.y - v);
+                float d = du*du + dv*dv;
+                if (d < minDist) { minDist = d; bestAlt = vert.uv.y; }
+            }
+            image[y * texSize + x] = (unsigned char)(255.0f * bestAlt);
+        }
+    }
+    stbi_write_png(filename.c_str(), texSize, texSize, 1, image.data(), texSize);
+}
 
 Icosphere::Icosphere(const glm::vec3& center, float radius, int subdivisions, bool withRelief)
     : center(center), radius(radius), withRelief(withRelief) {
@@ -21,6 +51,12 @@ Icosphere::Icosphere(const glm::vec3& center, float radius, int subdivisions, bo
         float u = 0.5f + atan2(p.z, p.x) / (2.0f * 3.14159265358979323846f);
         v.uv.x = u;
         // v.uv.y = altitude déjà encodée dans applyProceduralTerrain
+    }
+    // Génère la texture d'altitude (par défaut 1024x1024)
+    if (withRelief) {
+        printf("[Icosphere] Début génération heightmap...\n");
+        saveHeightmapTexture(vertices, 256, "heightmap.png");
+        printf("[Icosphere] Heightmap généré et sauvegardé.\n");
     }
 }
 
