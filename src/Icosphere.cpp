@@ -6,11 +6,13 @@
 
 #include "FastNoiseLite.h"
 
-Icosphere::Icosphere(const glm::vec3& center, float radius, int subdivisions)
-    : center(center), radius(radius) {
+Icosphere::Icosphere(const glm::vec3& center, float radius, int subdivisions, bool withRelief)
+    : center(center), radius(radius), withRelief(withRelief) {
     createIcosphere(radius, subdivisions);
-    // Génère les reliefs procéduraux automatiquement
-    applyProceduralTerrain(0.48f, radius * 0.2f);
+    if (withRelief) {
+        // Génère les reliefs procéduraux automatiquement
+        applyProceduralTerrain(0.48f, radius * 0.2f);
+    }
     // Décale tous les sommets pour que le mesh soit centré sur center
     for (auto& v : vertices) {
         v.position += center;
@@ -50,10 +52,14 @@ void Icosphere::bindGLBuffers() const {
     glBindVertexArray(vao);
 }
 
-void Icosphere::draw() const {
+void Icosphere::draw(bool triangles) const {
     glBindVertexArray(vao);
-    glPatchParameteri(GL_PATCH_VERTICES, 3);
-    glDrawElements(GL_PATCHES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, 0);
+    if (triangles) {
+        glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, 0);
+    } else {
+        glPatchParameteri(GL_PATCH_VERTICES, 3);
+        glDrawElements(GL_PATCHES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, 0);
+    }
     glBindVertexArray(0);
 }
 

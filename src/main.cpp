@@ -3,7 +3,6 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include "Icosphere.h"
-#include "SunSphere.h"
 #include "Camera.h"
 #include <chrono>
 #include <fstream>
@@ -108,14 +107,23 @@ int main() {
     glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
     glViewport(0, 0, fbWidth, fbHeight);
 
-    // Constantes planète et soleil
-    // Création de l'icosphere et des buffers
-    Icosphere icosphere(glm::vec3(0.0f), planetRadius, 5);
-    icosphere.initGLBuffers();
-    // Création du soleil (sphère lisse)
-    glm::vec3 sunPos = glm::vec3(0.0f) + sunDir * planetRadius * 10.0f;
-    SunSphere sun(sunPos, planetRadius * 1000.0f); // rayon 1000x planète
-    sun.initGLBuffers();
+
+// Inclinaison de l'axe de la planète (obliquité ~23.5°)
+float obliquity = glm::radians(23.5f);
+glm::mat4 planetTilt = glm::rotate(glm::mat4(1.0f), obliquity, glm::vec3(1,0,0));
+
+// Création de l'icosphere et des buffers
+Icosphere icosphere(glm::vec3(0.0f), planetRadius, 5, true);
+icosphere.initGLBuffers();
+
+// Direction du soleil sur l'équateur (axe X global), puis inclinaison obliquité
+glm::vec3 baseSunDir = glm::normalize(glm::vec3(1.0f, 0.0f, 0.0f));
+sunDir = glm::vec3(glm::rotate(glm::mat4(1.0f), obliquity, glm::vec3(1,0,0)) * glm::vec4(baseSunDir, 0.0f));
+
+// Création du soleil (utilise la même classe que la planète, mais sans relief)
+glm::vec3 sunPos = glm::vec3(0.0f) + sunDir * planetRadius * 10.0f;
+Icosphere sunIcosphere(sunPos, planetRadius * 2.0f, 5, false); // sphère lisse, même subdivision
+sunIcosphere.initGLBuffers();
 
     // Chargement des shaders
     auto readFile = [](const std::string& path) {
@@ -160,7 +168,10 @@ int main() {
     glDeleteShader(shadowFrag);
 
     const float planetRadius = 6371.0f;
-    Camera camera(planetRadius * 2.0f, 0.0f, 0.0f); // Distance initiale = 2x rayon planète
+    // Inclinaison initiale de la caméra pour orbiter sur l'équateur incliné
+    float initialYaw = 0.0f;
+    float initialPitch = glm::degrees(obliquity); // même inclinaison que la planète
+    Camera camera(planetRadius * 2.0f, initialYaw, initialPitch); // Distance initiale = 2x rayon planète
     bool orbitMode = true; // true = orbite, false = avion
     bool avionMode = false;
     AvionCamera avionCam;
@@ -192,11 +203,10 @@ int main() {
     glReadBuffer(GL_NONE);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    // Direction du soleil et matrices
-    glm::vec3 sunDir = glm::normalize(glm::vec3(-0.3f, -1.0f, -0.2f));
-    glm::mat4 lightView = glm::lookAt(-sunDir * planetRadius * 10.0f, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-    glm::mat4 lightProj = glm::ortho(-planetRadius*2, planetRadius*2, -planetRadius*2, planetRadius*2, planetRadius*2, planetRadius*20);
-    glm::mat4 lightSpaceMatrix = lightProj * lightView;
+// Direction du soleil et matrices (déjà inclinée)
+glm::mat4 lightView = glm::lookAt(-sunDir * planetRadius * 10.0f, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+glm::mat4 lightProj = glm::ortho(-planetRadius*2, planetRadius*2, -planetRadius*2, planetRadius*2, planetRadius*2, planetRadius*20);
+glm::mat4 lightSpaceMatrix = lightProj * lightView;
 
     while (!glfwWindowShouldClose(window)) {
         auto now = std::chrono::high_resolution_clock::now();
@@ -258,7 +268,7 @@ int main() {
             cameraFront = forward;
             cameraUp = up;
         } else if (orbitMode) {
-            if (leftPressed) camera.processMouseMovement(dx, dy);
+             if (leftPressed) camera.processMouseMovement(dx, dy);
         } else {
             if (leftPressed) {
                 camera.yaw += dx * 0.2f;
@@ -276,7 +286,7 @@ int main() {
         if (scrollData.yoffset != 0.0f) {
             float zoomFactor = 0.1f * planetRadius; // Zoom proportionnel au rayon planète
             camera.radius -= scrollData.yoffset * zoomFactor;
-            camera.radius = clamp(camera.radius, planetRadius * 1.1f, planetRadius * 20.0f); // Jamais dans la planète
+            if (camera.radius < planetRadius * 1.1f) camera.radius = planetRadius * 1.1f; // Jamais dans la planète
             camera.updatePosition();
             scrollData.yoffset = 0.0f;
         }
@@ -331,18 +341,20 @@ int main() {
         glDisable(GL_CULL_FACE); // Désactive le face culling
 
         // Soleil (sphère lisse émissive)
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL); // Toujours en mode faces pleines pour le soleil
         glUseProgram(sunProgram);
         glm::mat4 sunModel = glm::translate(glm::mat4(1.0f), sunPos);
         // Pour le soleil, on ignore toute rotation locale, il reste à sa position absolue
         glUniformMatrix4fv(glGetUniformLocation(sunProgram, "model"), 1, GL_FALSE, glm::value_ptr(sunModel));
         glUniformMatrix4fv(glGetUniformLocation(sunProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(sunProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
-        glUniform3f(glGetUniformLocation(sunProgram, "sunColor"), 1.0f, 0.95f, 0.8f);
-        sun.draw();
+        glUniform3f(glGetUniformLocation(sunProgram, "sunColor"), 1.0f, 0.95f, 0.2f); // jaune vif
+        sunIcosphere.draw(true); // Affiche le soleil en triangles pleins
 
         // Planète
         glUseProgram(planetProgram);
-        glUniformMatrix4fv(glGetUniformLocation(planetProgram, "model"), 1, GL_FALSE, glm::value_ptr(model));
+        // En mode orbite, la planète ne doit pas tourner avec la caméra : seul planetTilt s'applique
+        glUniformMatrix4fv(glGetUniformLocation(planetProgram, "model"), 1, GL_FALSE, glm::value_ptr(planetTilt));
         glUniformMatrix4fv(glGetUniformLocation(planetProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(planetProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
         glUniform1f(glGetUniformLocation(planetProgram, "planetRadius"), planetRadius);
@@ -359,7 +371,7 @@ int main() {
         glfwSwapBuffers(window);
     }
     icosphere.cleanupGLBuffers();
-    sun.cleanupGLBuffers();
+    sunIcosphere.cleanupGLBuffers();
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;

@@ -10,7 +10,7 @@
 
 class Icosphere {
 public:
-    Icosphere(const glm::vec3& center = glm::vec3(0.0f), float radius = 6371.0f, int subdivisions = 9);
+    Icosphere(const glm::vec3& center = glm::vec3(0.0f), float radius = 6371.0f, int subdivisions = 9, bool withRelief = true);
     glm::vec3 getCenter() const;
     struct Vertex {
         glm::vec3 position;
@@ -29,7 +29,7 @@ public:
     // Initialisation et gestion des buffers OpenGL
     void initGLBuffers();
     void bindGLBuffers() const;
-    void draw() const;
+    void draw(bool triangles = false) const;
     void cleanupGLBuffers();
 
 private:
@@ -38,6 +38,7 @@ private:
     std::vector<unsigned int> indices;
     float radius;
     void createIcosphere(float radius, int subdivisions);
+    bool withRelief = true;
     unsigned int addVertex(const glm::vec3& position);
     glm::vec3 getMiddlePoint(unsigned int p1, unsigned int p2, std::map<std::pair<unsigned int, unsigned int>, unsigned int>& cache);
 
