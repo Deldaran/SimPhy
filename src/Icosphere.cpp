@@ -41,7 +41,7 @@ Icosphere::Icosphere(const glm::vec3& center, float radius, int subdivisions, bo
     createIcosphere(radius, subdivisions);
     if (withRelief) {
         // Génère les reliefs procéduraux automatiquement
-        applyProceduralTerrain(0.48f, radius * 0.2f);
+        applyProceduralTerrain(0.48f, radius * 0.08f); // montagnes plus basses
     }
     // Décale tous les sommets pour que le mesh soit centré sur center
     for (auto& v : vertices) {
@@ -162,7 +162,8 @@ void Icosphere::applyProceduralTerrain(float oceanLevel, float mountainHeight) {
             int idx = static_cast<int>(idxf);
             float t = idxf - idx;
             color = glm::mix(landPalette[idx], landPalette[std::min(idx+1, (int)landPalette.size()-1)], t);
-            float mountain = pow(terrain, 3.0f) * mountainAmplitude; // Montagnes max
+            // Montagnes plus douces et arrondies
+            float mountain = glm::smoothstep(0.0f, 1.0f, terrain) * mountainAmplitude;
             float detailRelief = (detail - 0.5f) * detailAmplitude; // Détail fin
             h = mountain + detailRelief;
             altitude = h;
