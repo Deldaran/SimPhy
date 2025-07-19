@@ -132,9 +132,9 @@ void Icosphere::applyProceduralTerrain(float oceanLevel, float mountainHeight) {
         {0.7f, 0.8f, 0.9f}, {0.9f, 0.95f, 1.0f}, {1.0f, 1.0f, 1.0f}, {0.8f, 0.8f, 0.8f}, {0.6f, 0.7f, 0.9f}
     };
 
-    float oceanThreshold = 0.48f; // Seuil pour l'eau
-    float mountainAmplitude = mountainHeight; // Amplitude max montagne (ex: 2000m)
-    float detailAmplitude = mountainHeight * 0.2f; // Détail fin
+    float oceanThreshold = 0.52f; // Plus d'océans
+    float mountainAmplitude = mountainHeight * 0.5f; // Montagnes moins hautes
+    float detailAmplitude = mountainHeight * 0.15f; // Détail fin plus doux
 
     for (auto& v : vertices) {
         glm::vec3 posNorm = glm::normalize(v.position);
@@ -163,7 +163,8 @@ void Icosphere::applyProceduralTerrain(float oceanLevel, float mountainHeight) {
             float t = idxf - idx;
             color = glm::mix(landPalette[idx], landPalette[std::min(idx+1, (int)landPalette.size()-1)], t);
             // Montagnes plus douces et arrondies
-            float mountain = glm::smoothstep(0.0f, 1.0f, terrain) * mountainAmplitude;
+            float terrainSoft = pow(glm::smoothstep(0.0f, 1.0f, terrain), 1.7f); // Exposant pour arrondir les sommets
+            float mountain = terrainSoft * mountainAmplitude;
             float detailRelief = (detail - 0.5f) * detailAmplitude; // Détail fin
             h = mountain + detailRelief;
             altitude = h;

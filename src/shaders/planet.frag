@@ -134,8 +134,8 @@ vec3 estimateNormal(vec3 p) {
 
 // --- Biome selection ---
 int getBiome(float altitude, float lat, float moisture) {
-    if (altitude < -0.01) return 0; // océan
-    if (altitude < 0.02) return 1; // plage
+    if (altitude < 0.0) return 0; // océan (toute altitude négative)
+    if (altitude < 0.03) return 1; // plage (bande plus fine)
     if (moisture > 0.5 && altitude < 0.6 && lat < 0.7) return 2; // forêt
     if (altitude < 0.7) return 3; // plaine
     if (altitude < 0.85) return 4; // montagne
@@ -175,37 +175,44 @@ bool rayMarch(vec3 ro, vec3 rd, out vec3 hitPos, out float hitDist) {
 
 void main() {
     // Utilise la position et la normale du mesh CPU
-    vec3 pos = te_out.pos;
-    vec3 normal = normalize(te_out.normal);
 
-    // Altitude et biomes
+    vec3 pos = te_out.pos;
     float altitude = te_out.uv.y;
     float lat = abs(normalize(pos - planetCenter).y);
     float moisture = fbm(pos * 0.03);
     int biome = getBiome(altitude, lat, moisture);
     vec3 baseColor = biomeColor(biome);
 
-    // Lumière directionnelle (Soleil au loin)
-    vec3 lightDir = normalize(sunDirection);
-    float diff = max(dot(normal, lightDir), 0.0);
+    // Normale : radiale partout (sphère parfaite)
+    vec3 normal = normalize(pos - planetCenter);
 
-    // Ombre douce (soft shadow) par ray marching
+    // Lumière étendue : direction = du point de la surface du soleil le plus proche
+    // Échelle augmentée : planète et soleil plus grands et plus éloignés
+    // Nouvelle échelle : planète 100x, soleil 100x plus gros, 200x plus loin
+    float scaledRadius = planetRadius;
+    vec3 scaledPlanetCenter = planetCenter;
+    float sunDist = scaledRadius * 20000.0;
+    float sunRadius = scaledRadius * 1000.0;
+    vec3 sunCenter = scaledPlanetCenter + sunDirection * sunDist;
+    // Adapter la position du point courant à la nouvelle échelle
+    vec3 scaledPos = pos;
+    // La lumière part de la surface du soleil, en ligne droite depuis le soleil vers le point courant
+    vec3 dirToSun = normalize(sunCenter - scaledPos);
+    vec3 sunSurface = sunCenter - dirToSun * sunRadius;
+    vec3 lightDir = normalize(sunSurface - scaledPos);
+    float diff = max(dot(normal, lightDir), 0.01); // Clamp doux pour éviter les trous noirs
+
+    // Ombre portée du relief via ray marching
     float shadow = 1.0;
-    vec3 sunOrigin = planetCenter + sunDirection * (planetRadius * 10.0);
-    vec3 rayDir = normalize(pos - sunOrigin);
-    float t = 0.0;
-    float minRatio = 1.0;
-    float k = 32.0; // facteur de douceur (plus grand = ombre plus dure)
-    float distToSurf = length(pos - sunOrigin);
-    for (int i = 0; i < 64; ++i) {
-        vec3 p = sunOrigin + rayDir * t;
-        float d = planetSDF(p);
-        minRatio = min(minRatio, k * d / t);
-        if (d < 0.001) { minRatio = 0.0; break; }
-        t += max(d, 0.5);
-        if (t > distToSurf) break;
+    vec3 shadowOrigin = pos + normal * 8.0; // Décalage plus grand pour éviter l'auto-ombre tangentielle
+    vec3 shadowDir = normalize(sunSurface - shadowOrigin);
+    vec3 shadowHit; float shadowDist;
+    if (rayMarch(shadowOrigin, shadowDir, shadowHit, shadowDist)) {
+        // Si on touche la planète avant d'atteindre le soleil, on est dans l'ombre
+        float distToSun = length(sunSurface - shadowOrigin);
+        float distToHit = length(shadowHit - shadowOrigin);
+        if (distToHit < distToSun - 2.0) shadow = 0.0; // Marge augmentée pour éviter l'ombre tangentielle
     }
-    shadow = clamp(minRatio, 0.0, 1.0);
 
     // Blinn-Phong spéculaire
     vec3 viewDir = normalize(cameraPos - pos);
@@ -218,10 +225,31 @@ void main() {
     // Ambiant simple (constante, à remplacer par cubemap ou AO)
     vec3 ambient = vec3(0.15);
 
-    // Couleur finale avec ombre
+    // Couleur finale avec ombre (lumière directe)
     vec3 color = baseColor * diff * shadow + vec3(1.0) * spec * fresnel + ambient;
 
-    // ...effet d'éblouissement retiré, seul le ray marching pour l'ombre reste...
+    // --- Lumière indirecte par rebond diffus (1 bounce) ---
+    // On lance un rayon dans une direction aléatoire de l'hémisphère autour de la normale
+    // Pour rester simple et reproductible, on utilise la normale perturbée par le bruit
+    vec3 randDir = normalize(normal + vec3(fbm(pos * 0.17), fbm(pos * 0.31), fbm(pos * 0.47)));
+    if (dot(randDir, normal) < 0.0) randDir = -randDir; // Toujours dans l'hémisphère
+    vec3 bounceOrigin = pos + normal * 2.0; // Décale un peu pour ne pas s'auto-intersecter
+    vec3 bounceHit; float bounceDist;
+    bool bounce = rayMarch(bounceOrigin, randDir, bounceHit, bounceDist);
+    if (bounce) {
+        // On récupère la couleur diffuse à ce point
+        float bounceAlt = length(bounceHit - planetCenter) - planetRadius;
+        float bounceLat = abs(normalize(bounceHit - planetCenter).y);
+        float bounceMoist = fbm(bounceHit * 0.03);
+        int bounceBiome = getBiome(bounceAlt / 20.0, bounceLat, bounceMoist);
+        vec3 bounceColor = biomeColor(bounceBiome);
+        // On éclaire ce point par la lumière directe (approximation)
+        vec3 bounceNormal = normalize(bounceHit - planetCenter);
+        vec3 bounceToSun = normalize(sunSurface - bounceHit);
+        float bounceDiff = max(dot(bounceNormal, bounceToSun), 0.0);
+        // Ajoute une fraction de cette lumière à la couleur finale (énergie réduite)
+        color += 0.2 * bounceColor * bounceDiff;
+    }
 
     FragColor = vec4(color, 1.0);
 }
