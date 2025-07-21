@@ -187,31 +187,27 @@ void main() {
     vec3 normal = normalize(pos - planetCenter);
 
     // Lumière étendue : direction = du point de la surface du soleil le plus proche
-    // Échelle augmentée : planète et soleil plus grands et plus éloignés
-    // Nouvelle échelle : planète 100x, soleil 100x plus gros, 200x plus loin
     float scaledRadius = planetRadius;
     vec3 scaledPlanetCenter = planetCenter;
     float sunDist = scaledRadius * 20000.0;
     float sunRadius = scaledRadius * 1000.0;
     vec3 sunCenter = scaledPlanetCenter + sunDirection * sunDist;
-    // Adapter la position du point courant à la nouvelle échelle
     vec3 scaledPos = pos;
-    // La lumière part de la surface du soleil, en ligne droite depuis le soleil vers le point courant
     vec3 dirToSun = normalize(sunCenter - scaledPos);
     vec3 sunSurface = sunCenter - dirToSun * sunRadius;
-    vec3 lightDir = normalize(sunSurface - scaledPos);
-    float diff = max(dot(normal, lightDir), 0.01); // Clamp doux pour éviter les trous noirs
+    // Lumière principale : direction du soleil vers le point (pour tout objet)
+    vec3 lightDir = normalize(pos - sunSurface);
+    float diff = max(dot(normal, lightDir), 0.01);
 
     // Ombre portée du relief via ray marching
     float shadow = 1.0;
-    vec3 shadowOrigin = pos + normal * 8.0; // Décalage plus grand pour éviter l'auto-ombre tangentielle
-    vec3 shadowDir = normalize(sunSurface - shadowOrigin);
+    vec3 shadowOrigin = sunSurface;
+    vec3 shadowDir = normalize(pos - sunSurface);
     vec3 shadowHit; float shadowDist;
     if (rayMarch(shadowOrigin, shadowDir, shadowHit, shadowDist)) {
-        // Si on touche la planète avant d'atteindre le soleil, on est dans l'ombre
-        float distToSun = length(sunSurface - shadowOrigin);
-        float distToHit = length(shadowHit - shadowOrigin);
-        if (distToHit < distToSun - 2.0) shadow = 0.0; // Marge augmentée pour éviter l'ombre tangentielle
+        float distToSurface = length(pos - sunSurface);
+        float distToHit = length(shadowHit - sunSurface);
+        if (distToHit < distToSurface - 2.0) shadow = 0.0;
     }
 
     // Blinn-Phong spéculaire
@@ -219,37 +215,29 @@ void main() {
     vec3 halfDir = normalize(lightDir + viewDir);
     float spec = pow(max(dot(normal, halfDir), 0.0), 64.0);
 
-    // Fresnel
-    float fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), 5.0);
-
-    // Ambiant simple (constante, à remplacer par cubemap ou AO)
+    // Ambiant simple
     vec3 ambient = vec3(0.15);
+    vec3 color = baseColor * (ambient + diff * shadow) + vec3(1.0) * spec * 0.2;
 
-    // Couleur finale avec ombre (lumière directe)
-    vec3 color = baseColor * diff * shadow + vec3(1.0) * spec * fresnel + ambient;
-
-    // --- Lumière indirecte par rebond diffus (1 bounce) ---
-    // On lance un rayon dans une direction aléatoire de l'hémisphère autour de la normale
-    // Pour rester simple et reproductible, on utilise la normale perturbée par le bruit
-    vec3 randDir = normalize(normal + vec3(fbm(pos * 0.17), fbm(pos * 0.31), fbm(pos * 0.47)));
-    if (dot(randDir, normal) < 0.0) randDir = -randDir; // Toujours dans l'hémisphère
-    vec3 bounceOrigin = pos + normal * 2.0; // Décale un peu pour ne pas s'auto-intersecter
-    vec3 bounceHit; float bounceDist;
-    bool bounce = rayMarch(bounceOrigin, randDir, bounceHit, bounceDist);
-    if (bounce) {
-        // On récupère la couleur diffuse à ce point
-        float bounceAlt = length(bounceHit - planetCenter) - planetRadius;
-        float bounceLat = abs(normalize(bounceHit - planetCenter).y);
-        float bounceMoist = fbm(bounceHit * 0.03);
-        int bounceBiome = getBiome(bounceAlt / 20.0, bounceLat, bounceMoist);
-        vec3 bounceColor = biomeColor(bounceBiome);
-        // On éclaire ce point par la lumière directe (approximation)
-        vec3 bounceNormal = normalize(bounceHit - planetCenter);
-        vec3 bounceToSun = normalize(sunSurface - bounceHit);
-        float bounceDiff = max(dot(bounceNormal, bounceToSun), 0.0);
-        // Ajoute une fraction de cette lumière à la couleur finale (énergie réduite)
-        color += 0.2 * bounceColor * bounceDiff;
-    }
+    // --- Lumière indirecte par rebond diffus (1 bounce lissé) ---
+    // Direction lissée : bruit à basse fréquence et mix avec la normale
+    //vec3 noiseVec = vec3(fbm(pos * 0.03), fbm(pos * 0.05 + 10.0), fbm(pos * 0.07 - 20.0));
+    //vec3 randDir = normalize(mix(normal, normalize(normal + noiseVec), 0.3));
+    //if (dot(randDir, normal) < 0.0) randDir = -randDir;
+    //vec3 bounceOrigin = pos + normal * 2.0;
+    //vec3 bounceHit; float bounceDist;
+    //bool bounce = rayMarch(bounceOrigin, randDir, bounceHit, bounceDist);
+    //if (bounce) {
+    //    float bounceAlt = length(bounceHit - planetCenter) - planetRadius;
+    //    float bounceLat = abs(normalize(bounceHit - planetCenter).y);
+    //    float bounceMoist = fbm(bounceHit * 0.03);
+    //    int bounceBiome = getBiome(bounceAlt / 20.0, bounceLat, bounceMoist);
+    //    vec3 bounceColor = biomeColor(bounceBiome);
+    //    vec3 bounceNormal = normalize(bounceHit - planetCenter);
+    //    vec3 bounceToSun = normalize(sunSurface - bounceHit);
+    //    float bounceDiff = max(dot(bounceNormal, bounceToSun), 0.0);
+    //    color += 0.2 * bounceColor * bounceDiff;
+    //}
 
     FragColor = vec4(color, 1.0);
 }

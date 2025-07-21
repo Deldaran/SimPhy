@@ -14,11 +14,12 @@ find_package(imgui CONFIG REQUIRED)
 find_package(glad CONFIG REQUIRED)
 
 
+
 # Collect source files
 file(GLOB SOURCES "src/*.cpp")
-
-# Ajoute explicitement stb_image_write.cpp si jamais il n'est pas pris par le GLOB
+# Ajoute explicitement stb_image_write.cpp et tiny_obj_loader.cc si jamais ils ne sont pas pris par le GLOB
 list(APPEND SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/stb_image_write.cpp)
+list(APPEND SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/tiny_obj_loader.cc)
 
 # Create executable
 add_executable(GalaxyApp ${SOURCES})

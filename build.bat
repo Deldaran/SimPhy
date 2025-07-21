@@ -44,5 +44,12 @@ echo Copying shaders to build/bin/Release...
 for %%f in (src\shaders\*.vert src\shaders\*.frag src\shaders\*.tese src\shaders\*.tesc) do (
     xcopy /Y /F /I %%f build\bin\Release\
 )
+
+:: Copy .obj models to output directory
+echo Copying .obj models to build/bin/Release...
+for %%f in (src\*.obj) do (
+    xcopy /Y /F /I %%f build\bin\Release\
+)
+
 echo Executable location: build\bin\Release\GalaxyApp.exe
 pause
