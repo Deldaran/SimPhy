@@ -1,13 +1,12 @@
 @echo off
 echo Building Galaxy CPU project (Windows)...
 
-:: 1. Check Local VCPKG
-set VCPKG_ROOT=%~dp0vcpkg
-if exist "%VCPKG_ROOT%\vcpkg.exe" (
-    echo Found local vcpkg at %VCPKG_ROOT%
-) else (
-    echo Error: Local vcpkg not found at %VCPKG_ROOT%
-    echo Please run 'git clone https://github.com/microsoft/vcpkg.git' in the project root and run '.\vcpkg\bootstrap-vcpkg.bat'.
+:: 1. Configuration VCPKG (Adapter le chemin si besoin)
+if not defined VCPKG_ROOT set VCPKG_ROOT=C:\vcpkg
+
+if not exist "%VCPKG_ROOT%\vcpkg.exe" (
+    echo Error: vcpkg not found at %VCPKG_ROOT%
+    echo Please install vcpkg or set VCPKG_ROOT correctly.
     pause
     exit /b 1
 )

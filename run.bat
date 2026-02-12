@@ -1,14 +1,19 @@
 @echo off
 echo Running Galaxy CPU application...
 
-if exist "build\bin\Release\GalaxyApp.exe" (
+if exist "build\bin\GalaxyApp.exe" (
     echo Starting application...
-    "build\bin\Release\GalaxyApp.exe"
-) else if exist "build\bin\Debug\GalaxyApp.exe" (
-    echo Starting application (Debug)...
-    "build\bin\Debug\GalaxyApp.exe"
+    cd build\bin
+    start GalaxyApp.exe
+    cd ..\..
+) else if exist "build\bin\Release\GalaxyApp.exe" (
+    echo Starting application...
+    cd build\bin\Release
+    start GalaxyApp.exe
+    cd ..\..\..
 ) else (
-    echo Error: Application not found. Please build the project first using build.bat
+    echo Error: Application not found.
+    echo Please run build.bat first.
     pause
     exit /b 1
 )
