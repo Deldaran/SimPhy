@@ -1,70 +1,53 @@
-# Galaxy CPU - OpenGL Project
+# SimPhy – Simulation de galaxies sur GPU
 
-Ce projet utilise GLFW3 et OpenGL pour créer une application graphique simple.
+Simulation N-corps de galaxies en OpenGL 4.3 (compute shaders). L'objectif est d'étudier
+pourquoi la matière noire est nécessaire à l'existence de galaxies stables.
 
-## Prérequis
-
-1. **vcpkg** doit être installé dans `C:\vcpkg`
-   - Cloner vcpkg : `git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg`
-   - Exécuter : `C:\vcpkg\bootstrap-vcpkg.bat`
-   - Intégrer avec Visual Studio : `C:\vcpkg\vcpkg integrate install`
-
-2. **CMake** doit être installé et accessible dans le PATH
-
-3. **Visual Studio** ou **Build Tools for Visual Studio** avec les outils C++
+**Plateforme : Windows uniquement** (OpenGL 4.3 requis ; macOS s'arrête à OpenGL 4.1).
 
 ## Compilation
 
-Exécutez simplement le fichier `build.bat` :
+Prérequis : Visual Studio (ou Build Tools) avec les outils C++, CMake, et vcpkg dans `vcpkg/`
+à la racine du projet (`git clone https://github.com/microsoft/vcpkg.git` puis
+`.\vcpkg\bootstrap-vcpkg.bat`).
 
 ```batch
-build.bat
+build.bat   :: installe les dépendances et compile
+run.bat     :: lance build\bin\Release\GalaxyApp.exe
 ```
 
-Ce script va :
-- Vérifier que vcpkg est installé
-- Installer les dépendances (glfw3, opengl, glew)
-- Configurer le projet avec CMake
-- Compiler l'application
+`build_windows.bat` fait la même chose avec un vcpkg installé ailleurs (`VCPKG_ROOT`, par défaut `C:\vcpkg`).
 
-## Exécution
+Les shaders (`shaders/`) sont lus au lancement : on peut les modifier sans recompiler.
 
-Une fois compilé, vous pouvez lancer l'application avec :
-
-```batch
-run.bat
-```
-
-## Structure du projet
+## Structure
 
 ```
-Galaxy CPU/
-├── src/                    # Fichiers sources (.cpp)
-│   ├── main.cpp           # Point d'entrée principal
-│   ├── Application.cpp    # Classe Application
-│   ├── Window.cpp         # Gestion des fenêtres GLFW
-│   └── Scene.cpp          # Gestion du rendu
-├── include/               # Fichiers d'en-tête (.h)
-│   ├── Application.h      # Interface Application
-│   ├── Window.h           # Interface Window
-│   └── Scene.h            # Interface Scene
-├── build/                 # Dossier de compilation (généré)
-├── CMakeLists.txt         # Configuration CMake
-├── vcpkg.json            # Dépendances vcpkg
-├── build.bat             # Script de compilation
-├── run.bat               # Script d'exécution
-└── README.md             # Documentation
+src/
+├── main.cpp               Fenêtre, boucle principale, interface ImGui
+├── Units.h                Système d'unités (kpc, Myr, 1e10 M☉) et constante G
+├── ParticleSystem.*       Particules sur GPU (SSBO) et intégrateur leapfrog
+├── InitialConditions.*    Génération du disque galactique
+├── Renderer.*             Rendu des particules, bloom, tone mapping
+├── Camera.*               Vue de dessus / vol libre 3D
+└── Shader.*               Chargement des shaders
+shaders/
+├── kick.comp, drift.comp  Étapes du leapfrog
+├── accel_central.comp     Gravité d'une masse centrale adoucie
+└── *.vert, *.frag         Rendu
 ```
 
-## Fonctionnalités
+## Unités
 
-- Fenêtre OpenGL 800x600
-- Triangle coloré (rouge, vert, bleu)
-- Fond bleu foncé
-- Fermeture avec la touche Échap
+| Grandeur | Unité |
+|---|---|
+| Longueur | 1 kpc |
+| Temps | 1 Myr |
+| Masse | 1e10 M☉ |
+| Vitesse | 1 kpc/Myr ≈ 978 km/s |
+| G | 0,044985 |
 
-## Dépendances
+## Commandes
 
-- **GLFW3** : Gestion des fenêtres et entrées
-- **OpenGL** : Rendu graphique
-- **GLEW** : Extensions OpenGL
+- Vue de dessus : glisser avec le clic gauche, molette pour zoomer, flèches ou WASD pour se déplacer
+- Vol libre 3D : souris + WASD, Maj pour accélérer, Échap pour revenir

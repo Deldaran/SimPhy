@@ -1,0 +1,16 @@
+#version 430
+// Demi-pas « kick » du leapfrog : v <- v + a · dt/2
+
+layout(local_size_x = 256) in;
+
+struct Particle { vec4 pos; vec4 vel; vec4 acc; }; // identique à Particle (ParticleSystem.h)
+layout(std430, binding = 0) buffer Particles { Particle particles[]; };
+
+uniform uint count;
+uniform float halfDt;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= count) return;
+    particles[i].vel.xyz += particles[i].acc.xyz * halfDt;
+}

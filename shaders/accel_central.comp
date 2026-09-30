@@ -1,0 +1,27 @@
+#version 430
+// Accélération due à une masse centrale M placée à l'origine, avec adoucissement de Plummer :
+//
+//   a = -G M r / (r² + ε²)^(3/2)
+//
+// Pour r >> ε on retrouve Newton (a = G M / r²). Pour r << ε l'accélération
+// tend vers 0 au lieu de diverger : la masse est « étalée » sur une sphère de taille ~ε
+// (c'est le potentiel d'une sphère de Plummer).
+
+layout(local_size_x = 256) in;
+
+struct Particle { vec4 pos; vec4 vel; vec4 acc; }; // identique à Particle (ParticleSystem.h)
+layout(std430, binding = 0) buffer Particles { Particle particles[]; };
+
+uniform uint count;
+uniform float G;
+uniform float centralMass;
+uniform float softening;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= count) return;
+
+    vec3 r = particles[i].pos.xyz;
+    float invDist = inversesqrt(dot(r, r) + softening * softening);
+    particles[i].acc.xyz = -G * centralMass * r * (invDist * invDist * invDist);
+}
